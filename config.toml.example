@@ -1,0 +1,19 @@
+# AI ASG Advisor configuration
+# Copy to ~/.config/ai-asg-advisor/config.toml and update values.
+
+[llm]
+# Anthropic API key (or set ANTHROPIC_API_KEY env var)
+api_key = ""
+
+# Claude model to use (or set AI_ASG_ADVISOR_MODEL env var)
+model = "claude-sonnet-4-20250514"
+
+[aws]
+# AWS CLI profile name (default: ai-adviser)
+profile = "ai-adviser"
+
+# IAM role ARN to assume (optional, for EC2 execution)
+# role_arn = "arn:aws:iam::123456789012:role/ai-asg-advisor-role"
+
+# AWS region (or set AWS_DEFAULT_REGION env var)
+region = "us-east-1"
