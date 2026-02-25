@@ -307,24 +307,45 @@ resource "aws_autoscaling_policy" "celery_email_sync_scale_up" {
 }
 ```
 
+## Installation
+
+```bash
+pip install -e .
+
+# With development dependencies
+pip install -e ".[dev]"
+```
+
 ## Configuration
+
+### Config File
+
+Copy the example config and edit:
+
+```bash
+mkdir -p ~/.config/ai-asg-advisor
+cp config.toml.example ~/.config/ai-asg-advisor/config.toml
+```
+
+See [`config.toml.example`](config.toml.example) for all available settings.
 
 ### AWS Authorization
 
-| Environment | Method | Details |
-|-------------|--------|---------|
-| Local | Named profile | Profile `[ai-adviser]` in `~/.aws/credentials` |
-| EC2 | IAM role assumption | Role `ai-advisor-role` attached to the instance |
+| Environment | Method | CLI Flag |
+|-------------|--------|----------|
+| Local | Named profile | `--profile ai-adviser` (default) |
+| EC2 | IAM role assumption | `--role ai-advisor-role` or `--role arn:aws:iam::123456789012:role/...` |
+| Default chain | Environment / instance metadata | omit `--profile` and `--role` |
 
 ### Claude API Key
 
-The tool requires a Claude API key for LLM analysis:
+Set via environment variable (recommended):
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-Or via config file `~/.config/ai-asg-advisor/config.toml`:
+Or in the config file (`~/.config/ai-asg-advisor/config.toml`):
 
 ```toml
 [llm]
@@ -335,26 +356,35 @@ model = "claude-sonnet-4-20250514"
 ## Usage
 
 ```bash
-# Basic: analyze a single ASG/queue pair with balanced strategy
+# Basic: analyze with balanced strategy, output Terraform HCL
 ai-asg-advisor \
   --asg celery-email-sync-py39 \
   --queue email_sync_v2 \
   --period 2w
 
-# Cost-optimized analysis
+# Cost-optimized analysis, JSON output
 ai-asg-advisor \
   --asg celery-email-sync-py39 \
   --queue email_sync_v2 \
   --period 1m \
-  --strategy cost
+  --strategy cost \
+  --format json
 
-# Performance-optimized, output to file
+# Performance-optimized, write to file
 ai-asg-advisor \
   --asg celery-email-sync-py39 \
   --queue email_sync_v2 \
   --period 2w \
   --strategy performance \
-  --output report.json
+  --format terraform \
+  --output scaling_policy.tf
+
+# Human-readable text summary
+ai-asg-advisor \
+  --asg celery-email-sync-py39 \
+  --queue email_sync_v2 \
+  --period 2w \
+  --format text
 
 # Use IAM role (EC2 environment)
 ai-asg-advisor \
@@ -362,17 +392,47 @@ ai-asg-advisor \
   --queue email_sync_v2 \
   --period 2w \
   --role ai-advisor-role
+
+# Specify region and custom config file
+ai-asg-advisor \
+  --asg celery-email-sync-py39 \
+  --queue email_sync_v2 \
+  --region eu-west-1 \
+  --config ./my-config.toml
+
+# Verbose logging (debug output to stderr)
+ai-asg-advisor \
+  --asg celery-email-sync-py39 \
+  --queue email_sync_v2 \
+  -v
 ```
 
-## Analysis Period
+### CLI Options
 
-| Flag | Duration |
-|------|----------|
-| `1w` | 1 week |
-| `2w` | 2 weeks |
-| `3w` | 3 weeks |
-| `1m` | 1 month |
-| `2m` | 2 months |
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--asg` | Auto Scaling Group name (required) | — |
+| `--queue` | RabbitMQ queue name (required) | — |
+| `--period` | Analysis time period (`1w`, `2w`, `3w`, `1m`, `2m`) | `2w` |
+| `--strategy` | Optimization strategy (`cost`, `balanced`, `performance`) | `balanced` |
+| `--format` | Output format (`terraform`, `json`, `text`) | `terraform` |
+| `--output` | Write output to file instead of stdout | — |
+| `--profile` | AWS CLI profile name | `ai-adviser` |
+| `--role` | IAM role ARN or short name to assume | — |
+| `--region` | AWS region | `us-east-1` |
+| `--config` | Path to config file | `~/.config/ai-asg-advisor/config.toml` |
+| `-v, --verbose` | Enable debug logging to stderr | off |
+| `--version` | Show version and exit | — |
+
+### Analysis Period
+
+| Flag | Duration | CloudWatch Resolution |
+|------|----------|-----------------------|
+| `1w` | 1 week | 5-minute |
+| `2w` | 2 weeks | 5-minute |
+| `3w` | 3 weeks | 1-hour |
+| `1m` | 1 month | 1-hour |
+| `2m` | 2 months | 1-hour |
 
 ## Requirements
 
@@ -393,13 +453,34 @@ ai-asg-advisor \
         "cloudwatch:ListMetrics",
         "autoscaling:DescribeAutoScalingGroups",
         "autoscaling:DescribePolicies",
+        "autoscaling:DescribeLaunchConfigurations",
         "ec2:DescribeInstanceTypes",
         "ec2:DescribeLaunchTemplates",
         "ec2:DescribeLaunchTemplateVersions",
-        "pricing:GetProducts"
+        "pricing:GetProducts",
+        "sts:GetCallerIdentity",
+        "sts:AssumeRole"
       ],
       "Resource": "*"
     }
   ]
 }
+```
+
+## Development
+
+```bash
+# Create a virtual environment and install dev dependencies
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Run tests with coverage
+pytest --cov=ai_asg_advisor
+
+# Lint
+ruff check src/ tests/
 ```
