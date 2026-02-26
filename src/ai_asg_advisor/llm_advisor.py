@@ -315,7 +315,21 @@ def call_llm_advisor(
         messages=[{"role": "user", "content": user_message}],
     )
 
-    raw_text = message.content[0].text
+    raw_text = ""
+    for block in message.content:
+        if hasattr(block, "text"):
+            raw_text += block.text
+
+    if not raw_text.strip():
+        logger.error(
+            "LLM returned empty response. stop_reason=%s, content=%s",
+            message.stop_reason, message.content,
+        )
+        raise ValueError(
+            f"LLM returned empty response (stop_reason={message.stop_reason}). "
+            "Check your API key, model name, and base URL."
+        )
+
     logger.debug("Raw LLM response: %s", raw_text)
 
     return parse_llm_response(raw_text)
@@ -333,7 +347,11 @@ def parse_llm_response(raw_text: str) -> LLMAdvisorResponse:
         lines = [l for l in lines if not l.strip().startswith("```")]
         text = "\n".join(lines)
 
-    data = json.loads(text)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as e:
+        logger.error("Failed to parse LLM response as JSON: %s\nRaw text: %s", e, text[:500])
+        raise ValueError(f"LLM response is not valid JSON: {e}\nResponse preview: {text[:200]}") from e
     return _parse_response_dict(data)
 
 

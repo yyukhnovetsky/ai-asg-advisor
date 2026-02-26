@@ -78,9 +78,13 @@ def format_text(response: LLMAdvisorResponse, asg_name: str) -> str:
         lines.append("INSTANCE RECOMMENDATIONS:")
         for rec in response.instance_recommendations:
             savings = f" ({rec.savings_vs_current_pct:+.1f}%)" if rec.savings_vs_current_pct else ""
+            pricing = ""
+            if rec.price_per_hour is not None:
+                pricing = f" @ ${rec.price_per_hour:.4f}/hr"
+                if rec.monthly_cost_estimate is not None:
+                    pricing += f" (~${rec.monthly_cost_estimate:.0f}/mo{savings})"
             lines.append(
-                f"  {rec.instance_type}: {rec.vcpu}vCPU / {rec.memory_gb}GiB "
-                f"@ ${rec.price_per_hour:.4f}/hr (~${rec.monthly_cost_estimate:.0f}/mo{savings})"
+                f"  {rec.instance_type}: {rec.vcpu}vCPU / {rec.memory_gb}GiB{pricing}"
             )
             if rec.rationale:
                 lines.append(f"    {rec.rationale}")

@@ -202,7 +202,7 @@ class TestParseLLMResponse:
         assert result.step_scaling_policy.scale_up.cooldown == 60
 
     def test_invalid_json_raises(self):
-        with pytest.raises(json.JSONDecodeError):
+        with pytest.raises(ValueError, match="not valid JSON"):
             parse_llm_response("not json at all")
 
 

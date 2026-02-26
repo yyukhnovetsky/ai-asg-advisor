@@ -69,7 +69,7 @@ def get_instance_type_info(ec2_client, instance_type: str) -> InstanceTypeInfo:
     return _parse_instance_type(response["InstanceTypes"][0])
 
 
-def find_alternative_types(ec2_client, current_type: str) -> list[InstanceTypeInfo]:
+def find_alternative_types(ec2_client, current_type: str, include_graviton: bool = False) -> list[InstanceTypeInfo]:
     """Find alternative instance types with the same vCPU and memory."""
     current_info = get_instance_type_info(ec2_client, current_type)
 
@@ -88,6 +88,8 @@ def find_alternative_types(ec2_client, current_type: str) -> list[InstanceTypeIn
             if it["InstanceType"] == current_type:
                 continue
             parsed = _parse_instance_type(it)
+            if not include_graviton and parsed.architecture == "arm64":
+                continue
             if _is_relevant_alternative(current_type, parsed.instance_type):
                 alternatives.append(parsed)
 
@@ -124,10 +126,11 @@ def get_instance_recommendations(
     pricing_client,
     instance_type: str,
     region: str,
+    include_graviton: bool = False,
 ) -> InstanceRecommendations:
     """Build complete instance recommendations: current specs + priced alternatives."""
     current = get_instance_type_info(ec2_client, instance_type)
-    alternatives = find_alternative_types(ec2_client, instance_type)
+    alternatives = find_alternative_types(ec2_client, instance_type, include_graviton)
 
     # Price everything
     all_instances = [current] + alternatives

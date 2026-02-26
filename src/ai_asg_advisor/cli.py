@@ -54,6 +54,13 @@ VALID_FORMATS = ("terraform", "json", "text")
 )
 @click.option("--output", "output_file", default=None, type=click.Path(), help="Write output to file instead of stdout.")
 @click.option("--config", "config_path", default=None, type=click.Path(exists=True), help="Path to config file.")
+@click.option(
+    "--use-graviton",
+    type=click.Choice(("yes", "no"), case_sensitive=False),
+    default="no",
+    show_default=True,
+    help="Include Graviton (ARM64) instance types in recommendations.",
+)
 @click.option("--verbose", "-v", is_flag=True, default=False, help="Enable verbose logging.")
 @click.version_option(version=__version__, prog_name="ai-asg-advisor")
 def main(
@@ -68,6 +75,7 @@ def main(
     output_format: str,
     output_file: str | None,
     config_path: str | None,
+    use_graviton: str,
     verbose: bool,
 ) -> None:
     """Analyze ASG scaling behavior and generate optimized step policies using LLM analysis."""
@@ -104,6 +112,7 @@ def main(
     click.echo(f"  Period:    {period}", err=True)
     click.echo(f"  Strategy:  {strategy}", err=True)
     click.echo(f"  Region:    {config.aws.region}", err=True)
+    click.echo(f"  Graviton:  {use_graviton}", err=True)
     click.echo(f"  Format:    {output_format}", err=True)
     click.echo(err=True)
 
@@ -153,6 +162,7 @@ def main(
 
     instance_recs = get_instance_recommendations(
         ec2_client, pricing_client, primary_instance_type, config.aws.region,
+        include_graviton=use_graviton == "yes",
     )
 
     # Step 5: Pre-process and call LLM

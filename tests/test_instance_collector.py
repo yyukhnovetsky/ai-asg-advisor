@@ -192,7 +192,7 @@ class TestGetInstanceRecommendations:
                 "ai_asg_advisor.instance_collector._get_ondemand_price",
                 side_effect=lambda _client, it, _loc: prices.get(it),
             ):
-                recs = get_instance_recommendations(ec2, mock.MagicMock(), "m5.xlarge", "us-east-1")
+                recs = get_instance_recommendations(ec2, mock.MagicMock(), "m5.xlarge", "us-east-1", include_graviton=True)
 
             assert isinstance(recs, InstanceRecommendations)
             assert recs.current.instance_type == "m5.xlarge"
