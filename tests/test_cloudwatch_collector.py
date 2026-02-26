@@ -9,6 +9,7 @@ import pytest
 from botocore.stub import Stubber
 
 from ai_asg_advisor.cloudwatch_collector import (
+    DEFAULT_QUEUE_NAMESPACE,
     MetricTimeSeries,
     OTEL_LIB_DIMENSION,
     PERIOD_MAP,
@@ -174,7 +175,7 @@ class TestGetASGCapacityMetrics:
             assert result["max_size"].values == [20.0]
 
 
-def _queue_depth_expected_params(queue_name: str, period: int) -> dict:
+def _queue_depth_expected_params(queue_name: str, period: int, namespace: str = DEFAULT_QUEUE_NAMESPACE) -> dict:
     """Build expected params for queue depth stubber (ignoring timestamps)."""
     return {
         "MetricDataQueries": [
@@ -182,7 +183,7 @@ def _queue_depth_expected_params(queue_name: str, period: int) -> dict:
                 "Id": "queue_depth",
                 "MetricStat": {
                     "Metric": {
-                        "Namespace": "rabbitmq",
+                        "Namespace": namespace,
                         "MetricName": "rabbitmq_detailed_queue_messages_ready",
                         "Dimensions": [
                             {"Name": "OTelLib", "Value": OTEL_LIB_DIMENSION},

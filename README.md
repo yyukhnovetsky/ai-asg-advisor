@@ -419,7 +419,8 @@ ai-asg-advisor \
 | `--output` | Write output to file instead of stdout | — |
 | `--profile` | AWS CLI profile name | `ai-adviser` |
 | `--role` | IAM role ARN or short name to assume | — |
-| `--region` | AWS region | `us-east-1` |
+| `--region` | AWS region | `us-west-1` |
+| `--namespace` | CloudWatch metrics namespace (`cloudamqp/fat-plum-goat`, `CloudAMQP/metrics`) | `cloudamqp/fat-plum-goat` |
 | `--config` | Path to config file | `~/.config/ai-asg-advisor/config.toml` |
 | `-v, --verbose` | Enable debug logging to stderr | off |
 | `--version` | Show version and exit | — |

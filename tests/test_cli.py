@@ -78,7 +78,8 @@ class TestCLIValidation:
 
     def test_missing_api_key(self):
         runner = CliRunner()
-        env = {k: v for k, v in __import__("os").environ.items() if k != "ANTHROPIC_API_KEY"}
+        strip_keys = {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"}
+        env = {k: v for k, v in __import__("os").environ.items() if k not in strip_keys}
         with mock.patch.dict("os.environ", env, clear=True):
             result = runner.invoke(main, ["--asg", "test", "--queue", "test"])
             assert result.exit_code != 0

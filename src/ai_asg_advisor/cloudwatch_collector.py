@@ -23,6 +23,9 @@ _LONG_PERIOD_SECONDS = 3600      # 1 hour
 
 OTEL_LIB_DIMENSION = "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/prometheusreceiver"
 
+DEFAULT_QUEUE_NAMESPACE = "cloudamqp/fat-plum-goat"
+VALID_QUEUE_NAMESPACES = ("cloudamqp/fat-plum-goat", "CloudAMQP/metrics")
+
 
 @dataclass
 class MetricTimeSeries:
@@ -50,6 +53,7 @@ def get_queue_depth_metrics(
     cw_client,
     queue_name: str,
     period: str,
+    namespace: str = DEFAULT_QUEUE_NAMESPACE,
 ) -> MetricTimeSeries:
     """Fetch rabbitmq_detailed_queue_messages_ready for a specific queue.
 
@@ -71,7 +75,7 @@ def get_queue_depth_metrics(
                 "Id": "queue_depth",
                 "MetricStat": {
                     "Metric": {
-                        "Namespace": "rabbitmq",
+                        "Namespace": namespace,
                         "MetricName": "rabbitmq_detailed_queue_messages_ready",
                         "Dimensions": [
                             {"Name": "OTelLib", "Value": OTEL_LIB_DIMENSION},
@@ -102,7 +106,7 @@ def get_queue_depth_metrics(
                     "Id": "queue_depth",
                     "MetricStat": {
                         "Metric": {
-                            "Namespace": "rabbitmq",
+                            "Namespace": namespace,
                             "MetricName": "rabbitmq_detailed_queue_messages_ready",
                             "Dimensions": [
                                 {"Name": "OTelLib", "Value": OTEL_LIB_DIMENSION},

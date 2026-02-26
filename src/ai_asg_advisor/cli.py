@@ -10,6 +10,8 @@ import click
 from ai_asg_advisor import __version__
 from ai_asg_advisor.config import load_config
 
+from ai_asg_advisor.cloudwatch_collector import DEFAULT_QUEUE_NAMESPACE, VALID_QUEUE_NAMESPACES
+
 VALID_PERIODS = ("1w", "2w", "3w", "1m", "2m")
 VALID_STRATEGIES = ("cost", "balanced", "performance")
 VALID_FORMATS = ("terraform", "json", "text")
@@ -34,7 +36,14 @@ VALID_FORMATS = ("terraform", "json", "text")
 )
 @click.option("--profile", default=None, help="AWS profile name (default: ai-adviser).")
 @click.option("--role", default=None, help="IAM role ARN or name to assume (for EC2 execution).")
-@click.option("--region", default=None, help="AWS region (default: from config or us-east-1).")
+@click.option("--region", default=None, help="AWS region (default: from config or us-west-1).")
+@click.option(
+    "--namespace",
+    type=click.Choice(VALID_QUEUE_NAMESPACES, case_sensitive=True),
+    default=DEFAULT_QUEUE_NAMESPACE,
+    show_default=True,
+    help="CloudWatch metrics namespace for queue depth.",
+)
 @click.option(
     "--format",
     "output_format",
@@ -55,6 +64,7 @@ def main(
     profile: str | None,
     role: str | None,
     region: str | None,
+    namespace: str,
     output_format: str,
     output_file: str | None,
     config_path: str | None,
@@ -84,16 +94,17 @@ def main(
 
     if not config.llm.api_key:
         raise click.ClickException(
-            "Claude API key required. Set ANTHROPIC_API_KEY env var or add it to config file."
+            "Claude API key required. Set ANTHROPIC_AUTH_TOKEN env var or add it to config file."
         )
 
     click.echo(f"AI ASG Advisor v{__version__}", err=True)
-    click.echo(f"  ASG:      {asg}", err=True)
-    click.echo(f"  Queue:    {queue}", err=True)
-    click.echo(f"  Period:   {period}", err=True)
-    click.echo(f"  Strategy: {strategy}", err=True)
-    click.echo(f"  Region:   {config.aws.region}", err=True)
-    click.echo(f"  Format:   {output_format}", err=True)
+    click.echo(f"  ASG:       {asg}", err=True)
+    click.echo(f"  Queue:     {queue}", err=True)
+    click.echo(f"  Namespace: {namespace}", err=True)
+    click.echo(f"  Period:    {period}", err=True)
+    click.echo(f"  Strategy:  {strategy}", err=True)
+    click.echo(f"  Region:    {config.aws.region}", err=True)
+    click.echo(f"  Format:    {output_format}", err=True)
     click.echo(err=True)
 
     # -- Pipeline --
@@ -117,7 +128,7 @@ def main(
 
     # Step 2: Collect metrics
     click.echo("[2/6] Collecting CloudWatch metrics...", err=True)
-    queue_metrics = get_queue_depth_metrics(cw_client, queue, period)
+    queue_metrics = get_queue_depth_metrics(cw_client, queue, period, namespace)
     capacity_metrics = get_asg_capacity_metrics(cw_client, asg, period)
 
     if not queue_metrics.values:

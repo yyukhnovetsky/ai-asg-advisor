@@ -303,7 +303,10 @@ def call_llm_advisor(
         llm_config.model, strategy, analysis_context.asg_config.name,
     )
 
-    client = anthropic.Anthropic(api_key=llm_config.api_key)
+    client_kwargs: dict = {"api_key": llm_config.api_key}
+    if llm_config.base_url:
+        client_kwargs["base_url"] = llm_config.base_url
+    client = anthropic.Anthropic(**client_kwargs)
 
     message = client.messages.create(
         model=llm_config.model,
