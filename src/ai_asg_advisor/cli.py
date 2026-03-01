@@ -61,6 +61,20 @@ VALID_FORMATS = ("terraform", "json", "text")
     show_default=True,
     help="Include Graviton (ARM64) instance types in recommendations.",
 )
+@click.option(
+    "--warmup",
+    type=int,
+    default=120,
+    show_default=True,
+    help="Instance warmup time in seconds (time for new EC2 to be ready).",
+)
+@click.option(
+    "--drain",
+    type=int,
+    default=300,
+    show_default=True,
+    help="Instance drain time in seconds (time for EC2 to enter stopped state via lifecycle hook).",
+)
 @click.option("--verbose", "-v", is_flag=True, default=False, help="Enable verbose logging.")
 @click.version_option(version=__version__, prog_name="ai-asg-advisor")
 def main(
@@ -76,6 +90,8 @@ def main(
     output_file: str | None,
     config_path: str | None,
     use_graviton: str,
+    warmup: int,
+    drain: int,
     verbose: bool,
 ) -> None:
     """Analyze ASG scaling behavior and generate optimized step policies using LLM analysis."""
@@ -113,6 +129,8 @@ def main(
     click.echo(f"  Strategy:  {strategy}", err=True)
     click.echo(f"  Region:    {config.aws.region}", err=True)
     click.echo(f"  Graviton:  {use_graviton}", err=True)
+    click.echo(f"  Warmup:    {warmup}s", err=True)
+    click.echo(f"  Drain:     {drain}s", err=True)
     click.echo(f"  Format:    {output_format}", err=True)
     click.echo(err=True)
 
@@ -172,11 +190,12 @@ def main(
     )
     llm_response = call_llm_advisor(
         config.llm, analysis_context, instance_recs, strategy, period,
+        warmup_seconds=warmup, drain_seconds=drain,
     )
 
     # Step 6: Format output
     click.echo("[6/6] Generating output...", err=True)
-    output = format_output(llm_response, asg, output_format)
+    output = format_output(llm_response, asg, output_format, warmup_seconds=warmup)
 
     if output_file:
         Path(output_file).write_text(output)

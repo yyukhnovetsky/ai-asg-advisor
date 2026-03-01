@@ -194,12 +194,14 @@ class TestParseLLMResponse:
         assert len(result.step_scaling_policy.scale_up.step_adjustments) == 3
 
     def test_enforces_min_cooldown(self):
-        """Cooldowns below 60s should be raised to 60s."""
+        """Cooldowns below warmup/drain should be raised to warmup/drain."""
         data = json.loads(json.dumps(VALID_LLM_RESPONSE))
         data["step_scaling_policy"]["scale_up"]["cooldown"] = 30
+        data["step_scaling_policy"]["scale_down"]["cooldown"] = 60
         raw = json.dumps(data)
-        result = parse_llm_response(raw)
-        assert result.step_scaling_policy.scale_up.cooldown == 60
+        result = parse_llm_response(raw, warmup_seconds=120, drain_seconds=300)
+        assert result.step_scaling_policy.scale_up.cooldown == 120
+        assert result.step_scaling_policy.scale_down.cooldown == 300
 
     def test_invalid_json_raises(self):
         with pytest.raises(ValueError, match="not valid JSON"):
@@ -240,10 +242,10 @@ class TestValidateResponse:
     def test_positive_scale_down_raises(self):
         response = LLMAdvisorResponse(
             step_scaling_policy=LLMStepScalingPolicy(
-                scale_up=LLMScalingDirection(step_adjustments=[
+                scale_up=LLMScalingDirection(cooldown=120, step_adjustments=[
                     LLMStepAdjustment(scaling_adjustment=1),
                 ]),
-                scale_down=LLMScalingDirection(step_adjustments=[
+                scale_down=LLMScalingDirection(cooldown=300, step_adjustments=[
                     LLMStepAdjustment(scaling_adjustment=1),  # wrong: should be negative
                 ]),
             ),
@@ -254,10 +256,10 @@ class TestValidateResponse:
     def test_negative_scale_up_raises(self):
         response = LLMAdvisorResponse(
             step_scaling_policy=LLMStepScalingPolicy(
-                scale_up=LLMScalingDirection(step_adjustments=[
+                scale_up=LLMScalingDirection(cooldown=120, step_adjustments=[
                     LLMStepAdjustment(scaling_adjustment=-1),  # wrong: should be positive
                 ]),
-                scale_down=LLMScalingDirection(step_adjustments=[
+                scale_down=LLMScalingDirection(cooldown=300, step_adjustments=[
                     LLMStepAdjustment(scaling_adjustment=-1),
                 ]),
             ),

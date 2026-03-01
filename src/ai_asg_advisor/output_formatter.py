@@ -9,7 +9,7 @@ from dataclasses import asdict
 from ai_asg_advisor.llm_advisor import LLMAdvisorResponse, LLMStepAdjustment
 
 
-def format_terraform(response: LLMAdvisorResponse, asg_name: str) -> str:
+def format_terraform(response: LLMAdvisorResponse, asg_name: str, warmup_seconds: int = 120) -> str:
     """Generate Terraform HCL for step scaling policies."""
     blocks = []
 
@@ -24,6 +24,7 @@ def format_terraform(response: LLMAdvisorResponse, asg_name: str) -> str:
         asg_name=asg_name,
         adjustment_type=up.adjustment_type,
         cooldown=up.cooldown,
+        warmup=warmup_seconds,
         step_adjustments=up.step_adjustments,
     ))
 
@@ -35,6 +36,7 @@ def format_terraform(response: LLMAdvisorResponse, asg_name: str) -> str:
         asg_name=asg_name,
         adjustment_type=down.adjustment_type,
         cooldown=down.cooldown,
+        warmup=warmup_seconds,
         step_adjustments=down.step_adjustments,
     ))
 
@@ -103,10 +105,10 @@ def format_text(response: LLMAdvisorResponse, asg_name: str) -> str:
     return "\n".join(lines)
 
 
-def format_output(response: LLMAdvisorResponse, asg_name: str, output_format: str) -> str:
+def format_output(response: LLMAdvisorResponse, asg_name: str, output_format: str, warmup_seconds: int = 120) -> str:
     """Route to the appropriate formatter based on output_format."""
     if output_format == "terraform":
-        return format_terraform(response, asg_name)
+        return format_terraform(response, asg_name, warmup_seconds=warmup_seconds)
     elif output_format == "json":
         return format_json(response)
     elif output_format == "text":
@@ -123,6 +125,7 @@ def _terraform_policy_block(
     asg_name: str,
     adjustment_type: str,
     cooldown: int,
+    warmup: int,
     step_adjustments: list[LLMStepAdjustment],
 ) -> str:
     """Generate a single Terraform aws_autoscaling_policy resource block."""
@@ -132,7 +135,8 @@ def _terraform_policy_block(
         f'  autoscaling_group_name    = "{asg_name}"',
         f'  adjustment_type           = "{adjustment_type}"',
         f'  policy_type               = "StepScaling"',
-        f'  estimated_instance_warmup = {cooldown}',
+        f'  estimated_instance_warmup = {warmup}',
+        f'  cooldown                  = {cooldown}',
     ]
 
     for sa in step_adjustments:

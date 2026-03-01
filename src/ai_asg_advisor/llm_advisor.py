@@ -39,6 +39,14 @@ GUARDRAILS:
      desired_capacity.
    - Always include a scale-down policy alongside scale-up.
    - Minimum cooldown period: 60 seconds.
+   - INSTANCE WARMUP: New EC2 instances require a warmup period before they
+     can process tasks (boot, pull code, register workers). The scale-up
+     cooldown MUST be >= the provided instance_warmup_seconds to avoid
+     launching more instances before previous ones are ready.
+   - INSTANCE DRAIN: Instances have lifecycle hooks for graceful shutdown
+     (drain in-flight tasks). The scale-down cooldown MUST be >= the
+     provided instance_drain_seconds to avoid terminating additional
+     instances before previous ones have fully stopped.
 
 4. OUTPUT FORMAT: Return your response strictly as a single JSON object
    matching the output schema below. Do not include any text, markdown
@@ -65,7 +73,7 @@ OUTPUT SCHEMA:
   "step_scaling_policy": {
     "scale_up": {
       "adjustment_type": "ChangeInCapacity",
-      "cooldown": <int, seconds, >=60>,
+      "cooldown": <int, seconds, >= instance_warmup_seconds>,
       "step_adjustments": [
         {
           "metric_interval_lower_bound": <number>,
@@ -76,7 +84,7 @@ OUTPUT SCHEMA:
     },
     "scale_down": {
       "adjustment_type": "ChangeInCapacity",
-      "cooldown": <int, seconds, >=60>,
+      "cooldown": <int, seconds, >= instance_drain_seconds>,
       "step_adjustments": [
         {
           "metric_interval_lower_bound": <number or null for unbounded>,
@@ -189,6 +197,8 @@ def build_llm_input(
     instance_recs: InstanceRecommendations,
     strategy: str,
     period: str,
+    warmup_seconds: int = 120,
+    drain_seconds: int = 300,
 ) -> dict:
     """Assemble the structured data context for the LLM."""
     queue = analysis_context.queue_summary
@@ -233,6 +243,8 @@ def build_llm_input(
             "queue_name": queue.queue_name,
             "period": period,
             "strategy": strategy,
+            "instance_warmup_seconds": warmup_seconds,
+            "instance_drain_seconds": drain_seconds,
         },
         "queue_metrics": {
             "metric_name": "rabbitmq_detailed_queue_messages_ready",
@@ -285,9 +297,14 @@ def call_llm_advisor(
     instance_recs: InstanceRecommendations,
     strategy: str,
     period: str,
+    warmup_seconds: int = 120,
+    drain_seconds: int = 300,
 ) -> LLMAdvisorResponse:
     """Call Claude API with the analysis data and return structured recommendations."""
-    llm_input = build_llm_input(analysis_context, instance_recs, strategy, period)
+    llm_input = build_llm_input(
+        analysis_context, instance_recs, strategy, period,
+        warmup_seconds=warmup_seconds, drain_seconds=drain_seconds,
+    )
 
     strategy_prompt = STRATEGY_PROMPTS.get(strategy, STRATEGY_PROMPTS["balanced"])
     full_system = SYSTEM_PROMPT + "\n" + strategy_prompt
@@ -332,12 +349,12 @@ def call_llm_advisor(
 
     logger.debug("Raw LLM response: %s", raw_text)
 
-    return parse_llm_response(raw_text)
+    return parse_llm_response(raw_text, warmup_seconds=warmup_seconds, drain_seconds=drain_seconds)
 
 
 # -- Response parsing and validation --
 
-def parse_llm_response(raw_text: str) -> LLMAdvisorResponse:
+def parse_llm_response(raw_text: str, warmup_seconds: int = 120, drain_seconds: int = 300) -> LLMAdvisorResponse:
     """Parse and validate the LLM's JSON response into typed dataclasses."""
     # Strip markdown fences if present
     text = raw_text.strip()
@@ -352,16 +369,18 @@ def parse_llm_response(raw_text: str) -> LLMAdvisorResponse:
     except json.JSONDecodeError as e:
         logger.error("Failed to parse LLM response as JSON: %s\nRaw text: %s", e, text[:500])
         raise ValueError(f"LLM response is not valid JSON: {e}\nResponse preview: {text[:200]}") from e
-    return _parse_response_dict(data)
+    return _parse_response_dict(data, warmup_seconds=warmup_seconds, drain_seconds=drain_seconds)
 
 
-def _parse_response_dict(data: dict) -> LLMAdvisorResponse:
+def _parse_response_dict(data: dict, warmup_seconds: int = 120, drain_seconds: int = 300) -> LLMAdvisorResponse:
     """Convert a raw dict into a validated LLMAdvisorResponse."""
     response = LLMAdvisorResponse()
 
     # Parse step scaling policy
     if policy_data := data.get("step_scaling_policy"):
-        response.step_scaling_policy = _parse_scaling_policy(policy_data)
+        response.step_scaling_policy = _parse_scaling_policy(
+            policy_data, warmup_seconds=warmup_seconds, drain_seconds=drain_seconds,
+        )
 
     # Parse instance recommendations
     for rec_data in data.get("instance_recommendations", []):
@@ -386,19 +405,19 @@ def _parse_response_dict(data: dict) -> LLMAdvisorResponse:
         )
 
     # Validate guardrails
-    _validate_response(response)
+    _validate_response(response, warmup_seconds=warmup_seconds, drain_seconds=drain_seconds)
 
     return response
 
 
-def _parse_scaling_policy(data: dict) -> LLMStepScalingPolicy:
+def _parse_scaling_policy(data: dict, warmup_seconds: int = 120, drain_seconds: int = 300) -> LLMStepScalingPolicy:
     """Parse scale_up and scale_down from the policy dict."""
     policy = LLMStepScalingPolicy()
 
     if up := data.get("scale_up"):
         policy.scale_up = LLMScalingDirection(
             adjustment_type=up.get("adjustment_type", "ChangeInCapacity"),
-            cooldown=max(up.get("cooldown", 120), 60),  # enforce min 60s
+            cooldown=max(up.get("cooldown", warmup_seconds), warmup_seconds),
             step_adjustments=[
                 LLMStepAdjustment(
                     metric_interval_lower_bound=sa.get("metric_interval_lower_bound"),
@@ -412,7 +431,7 @@ def _parse_scaling_policy(data: dict) -> LLMStepScalingPolicy:
     if down := data.get("scale_down"):
         policy.scale_down = LLMScalingDirection(
             adjustment_type=down.get("adjustment_type", "ChangeInCapacity"),
-            cooldown=max(down.get("cooldown", 300), 60),  # enforce min 60s
+            cooldown=max(down.get("cooldown", drain_seconds), drain_seconds),
             step_adjustments=[
                 LLMStepAdjustment(
                     metric_interval_lower_bound=sa.get("metric_interval_lower_bound"),
@@ -426,7 +445,7 @@ def _parse_scaling_policy(data: dict) -> LLMStepScalingPolicy:
     return policy
 
 
-def _validate_response(response: LLMAdvisorResponse) -> None:
+def _validate_response(response: LLMAdvisorResponse, warmup_seconds: int = 120, drain_seconds: int = 300) -> None:
     """Enforce guardrails on the parsed response. Raises ValueError on violations."""
     policy = response.step_scaling_policy
 
@@ -436,11 +455,12 @@ def _validate_response(response: LLMAdvisorResponse) -> None:
     if not policy.scale_down.step_adjustments:
         raise ValueError("LLM response missing scale-down step adjustments")
 
-    # Cooldowns must be >= 60
-    if policy.scale_up.cooldown < 60:
-        raise ValueError(f"Scale-up cooldown {policy.scale_up.cooldown}s is below minimum 60s")
-    if policy.scale_down.cooldown < 60:
-        raise ValueError(f"Scale-down cooldown {policy.scale_down.cooldown}s is below minimum 60s")
+    # Scale-up cooldown must be >= warmup time
+    if policy.scale_up.cooldown < warmup_seconds:
+        raise ValueError(f"Scale-up cooldown {policy.scale_up.cooldown}s is below instance warmup {warmup_seconds}s")
+    # Scale-down cooldown must be >= drain time
+    if policy.scale_down.cooldown < drain_seconds:
+        raise ValueError(f"Scale-down cooldown {policy.scale_down.cooldown}s is below instance drain {drain_seconds}s")
 
     # Scale-up adjustments must be positive
     for sa in policy.scale_up.step_adjustments:

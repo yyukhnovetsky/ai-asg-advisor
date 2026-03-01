@@ -75,7 +75,8 @@ class TestFormatTerraform:
 
         assert 'resource "aws_autoscaling_policy" "celery_email_sync_py39_scale_down"' in result
         assert '"celery-email-sync-py39-scale-down"' in result
-        assert "estimated_instance_warmup = 300" in result
+        assert "estimated_instance_warmup = 120" in result
+        assert "cooldown                  = 300" in result
 
     def test_step_adjustments_present(self):
         result = format_terraform(_make_response(), "celery-email-sync-py39")
