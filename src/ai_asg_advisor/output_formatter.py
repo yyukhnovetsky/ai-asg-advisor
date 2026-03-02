@@ -10,37 +10,19 @@ from ai_asg_advisor.llm_advisor import LLMAdvisorResponse, LLMStepAdjustment
 
 
 def format_terraform(response: LLMAdvisorResponse, asg_name: str, warmup_seconds: int = 120) -> str:
-    """Generate Terraform HCL for step scaling policies."""
-    blocks = []
-
-    # Sanitize ASG name for Terraform resource naming
+    """Generate Terraform HCL for a single combined step scaling policy."""
     resource_name = re.sub(r"[^a-zA-Z0-9_]", "_", asg_name)
+    policy = response.step_scaling_policy
 
-    # Scale-up policy
-    up = response.step_scaling_policy.scale_up
-    blocks.append(_terraform_policy_block(
-        resource_name=f"{resource_name}_scale_up",
-        policy_name=f"{asg_name}-scale-up",
+    return _terraform_policy_block(
+        resource_name=f"{resource_name}_step_scaling",
+        policy_name=f"{asg_name}-step-scaling",
         asg_name=asg_name,
-        adjustment_type=up.adjustment_type,
-        cooldown=up.cooldown,
+        adjustment_type=policy.adjustment_type,
+        cooldown=policy.cooldown,
         warmup=warmup_seconds,
-        step_adjustments=up.step_adjustments,
-    ))
-
-    # Scale-down policy
-    down = response.step_scaling_policy.scale_down
-    blocks.append(_terraform_policy_block(
-        resource_name=f"{resource_name}_scale_down",
-        policy_name=f"{asg_name}-scale-down",
-        asg_name=asg_name,
-        adjustment_type=down.adjustment_type,
-        cooldown=down.cooldown,
-        warmup=warmup_seconds,
-        step_adjustments=down.step_adjustments,
-    ))
-
-    return "\n\n".join(blocks) + "\n"
+        step_adjustments=policy.step_adjustments,
+    ) + "\n"
 
 
 def format_json(response: LLMAdvisorResponse) -> str:
@@ -55,24 +37,17 @@ def format_text(response: LLMAdvisorResponse, asg_name: str) -> str:
     lines.append(f"=== Scaling Policy Recommendations for {asg_name} ===")
     lines.append("")
 
-    # Scale-up
-    up = response.step_scaling_policy.scale_up
-    lines.append(f"SCALE UP ({up.adjustment_type}, cooldown={up.cooldown}s):")
-    for sa in up.step_adjustments:
+    policy = response.step_scaling_policy
+    lines.append(f"STEP SCALING POLICY ({policy.adjustment_type}, cooldown={policy.cooldown}s):")
+    for sa in policy.step_adjustments:
         lower = sa.metric_interval_lower_bound
         upper = sa.metric_interval_upper_bound
         bound_str = _bound_str(lower, upper)
-        lines.append(f"  {bound_str} -> +{sa.scaling_adjustment} instances")
-    lines.append("")
-
-    # Scale-down
-    down = response.step_scaling_policy.scale_down
-    lines.append(f"SCALE DOWN ({down.adjustment_type}, cooldown={down.cooldown}s):")
-    for sa in down.step_adjustments:
-        lower = sa.metric_interval_lower_bound
-        upper = sa.metric_interval_upper_bound
-        bound_str = _bound_str(lower, upper)
-        lines.append(f"  {bound_str} -> {sa.scaling_adjustment} instances")
+        adj = sa.scaling_adjustment
+        if adj > 0:
+            lines.append(f"  {bound_str} -> +{adj} instances")
+        else:
+            lines.append(f"  {bound_str} -> {adj} instances")
     lines.append("")
 
     # Instance recommendations
@@ -142,10 +117,11 @@ def _terraform_policy_block(
     for sa in step_adjustments:
         lines.append("")
         lines.append("  step_adjustment {")
-        if sa.metric_interval_lower_bound is not None:
-            lines.append(f"    metric_interval_lower_bound = {_tf_number(sa.metric_interval_lower_bound)}")
+        lines.append(f"    metric_interval_lower_bound = {_tf_number(sa.metric_interval_lower_bound if sa.metric_interval_lower_bound is not None else 0)}")
         if sa.metric_interval_upper_bound is not None:
             lines.append(f"    metric_interval_upper_bound = {_tf_number(sa.metric_interval_upper_bound)}")
+        else:
+            lines.append(f"    metric_interval_upper_bound = null")
         lines.append(f"    scaling_adjustment          = {sa.scaling_adjustment}")
         lines.append("  }")
 
@@ -178,26 +154,19 @@ def _response_to_dict(response: LLMAdvisorResponse) -> dict:
     def _steps_to_list(steps):
         result = []
         for sa in steps:
-            d = {"scaling_adjustment": sa.scaling_adjustment}
-            if sa.metric_interval_lower_bound is not None:
-                d["metric_interval_lower_bound"] = sa.metric_interval_lower_bound
-            if sa.metric_interval_upper_bound is not None:
-                d["metric_interval_upper_bound"] = sa.metric_interval_upper_bound
+            d = {
+                "scaling_adjustment": sa.scaling_adjustment,
+                "metric_interval_lower_bound": sa.metric_interval_lower_bound if sa.metric_interval_lower_bound is not None else 0,
+                "metric_interval_upper_bound": sa.metric_interval_upper_bound,
+            }
             result.append(d)
         return result
 
     return {
         "step_scaling_policy": {
-            "scale_up": {
-                "adjustment_type": policy.scale_up.adjustment_type,
-                "cooldown": policy.scale_up.cooldown,
-                "step_adjustments": _steps_to_list(policy.scale_up.step_adjustments),
-            },
-            "scale_down": {
-                "adjustment_type": policy.scale_down.adjustment_type,
-                "cooldown": policy.scale_down.cooldown,
-                "step_adjustments": _steps_to_list(policy.scale_down.step_adjustments),
-            },
+            "adjustment_type": policy.adjustment_type,
+            "cooldown": policy.cooldown,
+            "step_adjustments": _steps_to_list(policy.step_adjustments),
         },
         "instance_recommendations": [
             {

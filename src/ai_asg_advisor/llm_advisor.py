@@ -37,23 +37,29 @@ GUARDRAILS:
      queue depth for >80% of the analysis period.
    - Never recommend a max_size lower than the observed peak
      desired_capacity.
-   - Always include a scale-down policy alongside scale-up.
+   - Always include both scale-down (negative adjustment) and scale-up
+     (positive adjustment) steps within the single policy.
    - Minimum cooldown period: 60 seconds.
    - INSTANCE WARMUP: New EC2 instances require a warmup period before they
-     can process tasks (boot, pull code, register workers). The scale-up
-     cooldown MUST be >= the provided instance_warmup_seconds to avoid
-     launching more instances before previous ones are ready.
+     can process tasks (boot, pull code, register workers). The cooldown
+     MUST be >= the provided instance_warmup_seconds to avoid launching
+     more instances before previous ones are ready.
    - INSTANCE DRAIN: Instances have lifecycle hooks for graceful shutdown
-     (drain in-flight tasks). The scale-down cooldown MUST be >= the
-     provided instance_drain_seconds to avoid terminating additional
-     instances before previous ones have fully stopped.
+     (drain in-flight tasks). The cooldown MUST also be >= the provided
+     instance_drain_seconds to avoid terminating additional instances
+     before previous ones have fully stopped. Use the maximum of
+     instance_warmup_seconds and instance_drain_seconds as the minimum
+     cooldown.
    - METRIC BOUNDS: The metric_interval_lower_bound and
      metric_interval_upper_bound values represent absolute queue depth
      thresholds (number of messages). Since queue depth cannot be negative,
-     ALL bounds MUST be >= 0. Use separate scale-up and scale-down policies
-     with non-negative thresholds. For scale-down, use low queue depth
-     thresholds (e.g., 0 to 100 messages) to trigger scale-in when the
-     queue is nearly empty.
+     ALL bounds MUST be >= 0. Every step MUST have both
+     metric_interval_lower_bound and metric_interval_upper_bound. Use 0
+     for the lowest lower_bound and null for the highest upper_bound
+     (unbounded). The first step should have a low threshold
+     (e.g., 0 to some small value) with a negative scaling_adjustment to
+     trigger scale-down when the queue is nearly empty. Higher thresholds
+     should have positive scaling_adjustments for scale-up.
 
 4. OUTPUT FORMAT: Return your response strictly as a single JSON object
    matching the output schema below. Do not include any text, markdown
@@ -78,28 +84,15 @@ GUARDRAILS:
 OUTPUT SCHEMA:
 {
   "step_scaling_policy": {
-    "scale_up": {
-      "adjustment_type": "ChangeInCapacity",
-      "cooldown": <int, seconds, >= instance_warmup_seconds>,
-      "step_adjustments": [
-        {
-          "metric_interval_lower_bound": <number >= 0>,
-          "metric_interval_upper_bound": <number >= 0 or null for unbounded>,
-          "scaling_adjustment": <positive int>
-        }
-      ]
-    },
-    "scale_down": {
-      "adjustment_type": "ChangeInCapacity",
-      "cooldown": <int, seconds, >= instance_drain_seconds>,
-      "step_adjustments": [
-        {
-          "metric_interval_lower_bound": <number >= 0 or null for unbounded>,
-          "metric_interval_upper_bound": <number >= 0>,
-          "scaling_adjustment": <negative int>
-        }
-      ]
-    }
+    "adjustment_type": "ChangeInCapacity",
+    "cooldown": <int, seconds, >= max(instance_warmup_seconds, instance_drain_seconds)>,
+    "step_adjustments": [
+      {
+        "metric_interval_lower_bound": <number >= 0, required>,
+        "metric_interval_upper_bound": <number >= 0 or null for unbounded, required>,
+        "scaling_adjustment": <int, negative for scale-down, positive for scale-up>
+      }
+    ]
   },
   "instance_recommendations": [
     {
@@ -160,16 +153,10 @@ class LLMStepAdjustment:
 
 
 @dataclass
-class LLMScalingDirection:
-    adjustment_type: str = "ChangeInCapacity"
-    cooldown: int = 120
-    step_adjustments: list[LLMStepAdjustment] = field(default_factory=list)
-
-
-@dataclass
 class LLMStepScalingPolicy:
-    scale_up: LLMScalingDirection = field(default_factory=LLMScalingDirection)
-    scale_down: LLMScalingDirection = field(default_factory=LLMScalingDirection)
+    adjustment_type: str = "ChangeInCapacity"
+    cooldown: int = 300
+    step_adjustments: list[LLMStepAdjustment] = field(default_factory=list)
 
 
 @dataclass
@@ -418,79 +405,60 @@ def _parse_response_dict(data: dict, warmup_seconds: int = 120, drain_seconds: i
 
 
 def _parse_scaling_policy(data: dict, warmup_seconds: int = 120, drain_seconds: int = 300) -> LLMStepScalingPolicy:
-    """Parse scale_up and scale_down from the policy dict."""
-    policy = LLMStepScalingPolicy()
-
-    if up := data.get("scale_up"):
-        policy.scale_up = LLMScalingDirection(
-            adjustment_type=up.get("adjustment_type", "ChangeInCapacity"),
-            cooldown=max(up.get("cooldown", warmup_seconds), warmup_seconds),
-            step_adjustments=[
-                LLMStepAdjustment(
-                    metric_interval_lower_bound=sa.get("metric_interval_lower_bound"),
-                    metric_interval_upper_bound=sa.get("metric_interval_upper_bound"),
-                    scaling_adjustment=sa.get("scaling_adjustment", 1),
-                )
-                for sa in up.get("step_adjustments", [])
-            ],
-        )
-
-    if down := data.get("scale_down"):
-        policy.scale_down = LLMScalingDirection(
-            adjustment_type=down.get("adjustment_type", "ChangeInCapacity"),
-            cooldown=max(down.get("cooldown", drain_seconds), drain_seconds),
-            step_adjustments=[
-                LLMStepAdjustment(
-                    metric_interval_lower_bound=sa.get("metric_interval_lower_bound"),
-                    metric_interval_upper_bound=sa.get("metric_interval_upper_bound"),
-                    scaling_adjustment=sa.get("scaling_adjustment", -1),
-                )
-                for sa in down.get("step_adjustments", [])
-            ],
-        )
-
-    return policy
+    """Parse the single combined step scaling policy."""
+    min_cooldown = max(warmup_seconds, drain_seconds)
+    return LLMStepScalingPolicy(
+        adjustment_type=data.get("adjustment_type", "ChangeInCapacity"),
+        cooldown=max(data.get("cooldown", min_cooldown), min_cooldown),
+        step_adjustments=[
+            LLMStepAdjustment(
+                metric_interval_lower_bound=sa.get("metric_interval_lower_bound"),
+                metric_interval_upper_bound=sa.get("metric_interval_upper_bound"),
+                scaling_adjustment=sa.get("scaling_adjustment", 0),
+            )
+            for sa in data.get("step_adjustments", [])
+        ],
+    )
 
 
 def _validate_response(response: LLMAdvisorResponse, warmup_seconds: int = 120, drain_seconds: int = 300) -> None:
     """Enforce guardrails on the parsed response. Raises ValueError on violations."""
     policy = response.step_scaling_policy
+    min_cooldown = max(warmup_seconds, drain_seconds)
 
-    # Must have both scale-up and scale-down
-    if not policy.scale_up.step_adjustments:
-        raise ValueError("LLM response missing scale-up step adjustments")
-    if not policy.scale_down.step_adjustments:
-        raise ValueError("LLM response missing scale-down step adjustments")
+    # Must have step adjustments
+    if not policy.step_adjustments:
+        raise ValueError("LLM response missing step adjustments")
 
-    # Scale-up cooldown must be >= warmup time
-    if policy.scale_up.cooldown < warmup_seconds:
-        raise ValueError(f"Scale-up cooldown {policy.scale_up.cooldown}s is below instance warmup {warmup_seconds}s")
-    # Scale-down cooldown must be >= drain time
-    if policy.scale_down.cooldown < drain_seconds:
-        raise ValueError(f"Scale-down cooldown {policy.scale_down.cooldown}s is below instance drain {drain_seconds}s")
+    # Cooldown must be >= max(warmup, drain)
+    if policy.cooldown < min_cooldown:
+        raise ValueError(
+            f"Cooldown {policy.cooldown}s is below minimum {min_cooldown}s "
+            f"(warmup={warmup_seconds}s, drain={drain_seconds}s)"
+        )
 
-    # Scale-up adjustments must be positive
-    for sa in policy.scale_up.step_adjustments:
-        if sa.scaling_adjustment <= 0:
-            raise ValueError(f"Scale-up adjustment must be positive, got {sa.scaling_adjustment}")
-
-    # Scale-down adjustments must be negative
-    for sa in policy.scale_down.step_adjustments:
-        if sa.scaling_adjustment >= 0:
-            raise ValueError(f"Scale-down adjustment must be negative, got {sa.scaling_adjustment}")
+    # Must have at least one negative (scale-down) and one positive (scale-up) adjustment
+    has_scale_down = any(sa.scaling_adjustment < 0 for sa in policy.step_adjustments)
+    has_scale_up = any(sa.scaling_adjustment > 0 for sa in policy.step_adjustments)
+    if not has_scale_down:
+        raise ValueError("Policy must include at least one scale-down step (negative adjustment)")
+    if not has_scale_up:
+        raise ValueError("Policy must include at least one scale-up step (positive adjustment)")
 
     # Clamp negative bounds to 0 — queue depth cannot be negative
-    for direction in (policy.scale_up, policy.scale_down):
-        for sa in direction.step_adjustments:
-            if sa.metric_interval_lower_bound is not None and sa.metric_interval_lower_bound < 0:
-                logger.warning(
-                    "Clamping negative lower_bound %.0f to 0 (queue depth cannot be negative)",
-                    sa.metric_interval_lower_bound,
-                )
-                sa.metric_interval_lower_bound = 0
-            if sa.metric_interval_upper_bound is not None and sa.metric_interval_upper_bound < 0:
-                logger.warning(
-                    "Clamping negative upper_bound %.0f to 0 (queue depth cannot be negative)",
-                    sa.metric_interval_upper_bound,
-                )
-                sa.metric_interval_upper_bound = 0
+    # Also ensure every step has both bounds (lower defaults to 0, upper to null)
+    for sa in policy.step_adjustments:
+        if sa.metric_interval_lower_bound is None:
+            sa.metric_interval_lower_bound = 0
+        if sa.metric_interval_lower_bound < 0:
+            logger.warning(
+                "Clamping negative lower_bound %.0f to 0 (queue depth cannot be negative)",
+                sa.metric_interval_lower_bound,
+            )
+            sa.metric_interval_lower_bound = 0
+        if sa.metric_interval_upper_bound is not None and sa.metric_interval_upper_bound < 0:
+            logger.warning(
+                "Clamping negative upper_bound %.0f to 0 (queue depth cannot be negative)",
+                sa.metric_interval_upper_bound,
+            )
+            sa.metric_interval_upper_bound = 0

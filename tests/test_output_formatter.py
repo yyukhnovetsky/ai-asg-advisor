@@ -10,7 +10,6 @@ from ai_asg_advisor.llm_advisor import (
     LLMAdvisorResponse,
     LLMInstanceRecommendation,
     LLMRationale,
-    LLMScalingDirection,
     LLMStepAdjustment,
     LLMStepScalingPolicy,
 )
@@ -25,22 +24,14 @@ from ai_asg_advisor.output_formatter import (
 def _make_response() -> LLMAdvisorResponse:
     return LLMAdvisorResponse(
         step_scaling_policy=LLMStepScalingPolicy(
-            scale_up=LLMScalingDirection(
-                adjustment_type="ChangeInCapacity",
-                cooldown=120,
-                step_adjustments=[
-                    LLMStepAdjustment(metric_interval_lower_bound=0, metric_interval_upper_bound=200, scaling_adjustment=1),
-                    LLMStepAdjustment(metric_interval_lower_bound=200, metric_interval_upper_bound=500, scaling_adjustment=2),
-                    LLMStepAdjustment(metric_interval_lower_bound=500, scaling_adjustment=4),
-                ],
-            ),
-            scale_down=LLMScalingDirection(
-                adjustment_type="ChangeInCapacity",
-                cooldown=300,
-                step_adjustments=[
-                    LLMStepAdjustment(metric_interval_lower_bound=-100, metric_interval_upper_bound=0, scaling_adjustment=-1),
-                ],
-            ),
+            adjustment_type="ChangeInCapacity",
+            cooldown=300,
+            step_adjustments=[
+                LLMStepAdjustment(metric_interval_lower_bound=0, metric_interval_upper_bound=100, scaling_adjustment=-100),
+                LLMStepAdjustment(metric_interval_lower_bound=100, metric_interval_upper_bound=200, scaling_adjustment=1),
+                LLMStepAdjustment(metric_interval_lower_bound=200, metric_interval_upper_bound=500, scaling_adjustment=2),
+                LLMStepAdjustment(metric_interval_lower_bound=500, metric_interval_upper_bound=None, scaling_adjustment=4),
+            ],
         ),
         instance_recommendations=[
             LLMInstanceRecommendation(
@@ -62,19 +53,12 @@ def _make_response() -> LLMAdvisorResponse:
 
 
 class TestFormatTerraform:
-    def test_generates_scale_up_block(self):
+    def test_generates_single_policy_block(self):
         result = format_terraform(_make_response(), "celery-email-sync-py39")
 
-        assert 'resource "aws_autoscaling_policy" "celery_email_sync_py39_scale_up"' in result
-        assert '"celery-email-sync-py39-scale-up"' in result
+        assert 'resource "aws_autoscaling_policy" "celery_email_sync_py39_step_scaling"' in result
+        assert '"celery-email-sync-py39-step-scaling"' in result
         assert 'policy_type               = "StepScaling"' in result
-        assert "estimated_instance_warmup = 120" in result
-
-    def test_generates_scale_down_block(self):
-        result = format_terraform(_make_response(), "celery-email-sync-py39")
-
-        assert 'resource "aws_autoscaling_policy" "celery_email_sync_py39_scale_down"' in result
-        assert '"celery-email-sync-py39-scale-down"' in result
         assert "estimated_instance_warmup = 120" in result
         assert "cooldown                  = 300" in result
 
@@ -83,33 +67,23 @@ class TestFormatTerraform:
 
         assert "step_adjustment {" in result
         assert "metric_interval_lower_bound = 0" in result
-        assert "metric_interval_upper_bound = 200" in result
+        assert "metric_interval_upper_bound = 100" in result
+        assert "scaling_adjustment          = -100" in result
         assert "scaling_adjustment          = 1" in result
         assert "scaling_adjustment          = 4" in result
-        assert "scaling_adjustment          = -1" in result
 
-    def test_unbounded_upper_omitted(self):
-        """The last scale-up step has no upper bound — it should be omitted in TF."""
+    def test_both_bounds_always_present(self):
+        """Every step should have both lower and upper bounds."""
         result = format_terraform(_make_response(), "celery-email-sync-py39")
 
-        # Find the step with adjustment=4 (unbounded upper)
-        # It should have lower_bound=500 but no upper_bound line
-        lines = result.split("\n")
-        found_adj_4 = False
-        for i, line in enumerate(lines):
-            if "scaling_adjustment          = 4" in line:
-                found_adj_4 = True
-                # Look at the preceding lines in this step_adjustment block
-                block_start = max(0, i - 3)
-                block = "\n".join(lines[block_start:i + 1])
-                assert "metric_interval_lower_bound = 500" in block
-                assert "metric_interval_upper_bound" not in block
-                break
-        assert found_adj_4
+        # The last step has upper_bound=None, should render as null
+        assert "metric_interval_upper_bound = null" in result
+        # The first step has lower_bound=0
+        assert "metric_interval_lower_bound = 0" in result
 
     def test_sanitizes_resource_name(self):
         result = format_terraform(_make_response(), "celery-worker-py39")
-        assert "celery_worker_py39_scale_up" in result
+        assert "celery_worker_py39_step_scaling" in result
 
 
 class TestFormatJSON:
@@ -121,14 +95,26 @@ class TestFormatJSON:
         assert "instance_recommendations" in data
         assert "rationale" in data
 
-    def test_scale_up_steps(self):
+    def test_steps_in_single_policy(self):
         result = format_json(_make_response())
         data = json.loads(result)
 
-        steps = data["step_scaling_policy"]["scale_up"]["step_adjustments"]
-        assert len(steps) == 3
-        assert steps[0]["scaling_adjustment"] == 1
-        assert steps[2]["scaling_adjustment"] == 4
+        policy = data["step_scaling_policy"]
+        assert policy["adjustment_type"] == "ChangeInCapacity"
+        assert policy["cooldown"] == 300
+        steps = policy["step_adjustments"]
+        assert len(steps) == 4
+        assert steps[0]["scaling_adjustment"] == -100
+        assert steps[3]["scaling_adjustment"] == 4
+
+    def test_both_bounds_present(self):
+        """Every step should have both bounds in JSON output."""
+        result = format_json(_make_response())
+        data = json.loads(result)
+
+        for step in data["step_scaling_policy"]["step_adjustments"]:
+            assert "metric_interval_lower_bound" in step
+            assert "metric_interval_upper_bound" in step
 
     def test_instance_recommendations(self):
         result = format_json(_make_response())
@@ -139,30 +125,18 @@ class TestFormatJSON:
         assert recs[0]["instance_type"] == "m6g.xlarge"
         assert recs[0]["savings_vs_current_pct"] == 19.8
 
-    def test_null_bounds_omitted(self):
-        """None bounds should not appear as null in JSON."""
-        result = format_json(_make_response())
-        data = json.loads(result)
-
-        last_step = data["step_scaling_policy"]["scale_up"]["step_adjustments"][2]
-        assert "metric_interval_upper_bound" not in last_step
-
 
 class TestFormatText:
     def test_contains_header(self):
         result = format_text(_make_response(), "celery-email-sync-py39")
         assert "celery-email-sync-py39" in result
 
-    def test_contains_scale_up(self):
+    def test_contains_scale_up_and_down(self):
         result = format_text(_make_response(), "celery-email-sync-py39")
-        assert "SCALE UP" in result
+        assert "STEP SCALING POLICY" in result
         assert "+1 instances" in result
         assert "+4 instances" in result
-
-    def test_contains_scale_down(self):
-        result = format_text(_make_response(), "celery-email-sync-py39")
-        assert "SCALE DOWN" in result
-        assert "-1 instances" in result
+        assert "-100 instances" in result
 
     def test_contains_instance_recs(self):
         result = format_text(_make_response(), "celery-email-sync-py39")
@@ -187,7 +161,7 @@ class TestFormatOutput:
 
     def test_routes_text(self):
         result = format_output(_make_response(), "test-asg", "text")
-        assert "SCALE UP" in result
+        assert "STEP SCALING POLICY" in result
 
     def test_unknown_format_raises(self):
         with pytest.raises(ValueError, match="Unknown"):

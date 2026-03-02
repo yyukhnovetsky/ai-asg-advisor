@@ -16,7 +16,6 @@ from ai_asg_advisor.llm_advisor import (
     LLMAdvisorResponse,
     LLMInstanceRecommendation,
     LLMRationale,
-    LLMScalingDirection,
     LLMStepAdjustment,
     LLMStepScalingPolicy,
     STRATEGY_PROMPTS,
@@ -112,22 +111,14 @@ def _make_instance_recs() -> InstanceRecommendations:
 
 VALID_LLM_RESPONSE = {
     "step_scaling_policy": {
-        "scale_up": {
-            "adjustment_type": "ChangeInCapacity",
-            "cooldown": 120,
-            "step_adjustments": [
-                {"metric_interval_lower_bound": 0, "metric_interval_upper_bound": 200, "scaling_adjustment": 1},
-                {"metric_interval_lower_bound": 200, "metric_interval_upper_bound": 500, "scaling_adjustment": 2},
-                {"metric_interval_lower_bound": 500, "scaling_adjustment": 4},
-            ],
-        },
-        "scale_down": {
-            "adjustment_type": "ChangeInCapacity",
-            "cooldown": 300,
-            "step_adjustments": [
-                {"metric_interval_lower_bound": -100, "metric_interval_upper_bound": 0, "scaling_adjustment": -1},
-            ],
-        },
+        "adjustment_type": "ChangeInCapacity",
+        "cooldown": 300,
+        "step_adjustments": [
+            {"metric_interval_lower_bound": 0, "metric_interval_upper_bound": 100, "scaling_adjustment": -100},
+            {"metric_interval_lower_bound": 100, "metric_interval_upper_bound": 200, "scaling_adjustment": 1},
+            {"metric_interval_lower_bound": 200, "metric_interval_upper_bound": 500, "scaling_adjustment": 2},
+            {"metric_interval_lower_bound": 500, "metric_interval_upper_bound": None, "scaling_adjustment": 4},
+        ],
     },
     "instance_recommendations": [
         {
@@ -159,6 +150,8 @@ class TestBuildLLMInput:
 
         assert result["analysis_request"]["asg_name"] == "celery-email-sync-py39"
         assert result["analysis_request"]["strategy"] == "balanced"
+        assert result["analysis_request"]["instance_warmup_seconds"] == 120
+        assert result["analysis_request"]["instance_drain_seconds"] == 300
         assert result["queue_metrics"]["statistics"]["p95"] == 520.0
         assert result["asg_data"]["current_config"]["max_size"] == 20
         assert result["asg_data"]["capacity_history"]["max_desired"] == 18.0
@@ -181,27 +174,25 @@ class TestParseLLMResponse:
         result = parse_llm_response(raw)
 
         assert isinstance(result, LLMAdvisorResponse)
-        assert len(result.step_scaling_policy.scale_up.step_adjustments) == 3
-        assert len(result.step_scaling_policy.scale_down.step_adjustments) == 1
-        assert result.step_scaling_policy.scale_up.cooldown == 120
-        assert result.step_scaling_policy.scale_down.cooldown == 300
+        policy = result.step_scaling_policy
+        assert len(policy.step_adjustments) == 4
+        assert policy.cooldown == 300
+        assert policy.adjustment_type == "ChangeInCapacity"
         assert result.instance_recommendations[0].instance_type == "m6g.xlarge"
         assert result.rationale.scaling_policy == "Queue depth p95 is 520 messages."
 
     def test_strips_markdown_fences(self):
         raw = f"```json\n{json.dumps(VALID_LLM_RESPONSE)}\n```"
         result = parse_llm_response(raw)
-        assert len(result.step_scaling_policy.scale_up.step_adjustments) == 3
+        assert len(result.step_scaling_policy.step_adjustments) == 4
 
     def test_enforces_min_cooldown(self):
-        """Cooldowns below warmup/drain should be raised to warmup/drain."""
+        """Cooldowns below max(warmup, drain) should be raised."""
         data = json.loads(json.dumps(VALID_LLM_RESPONSE))
-        data["step_scaling_policy"]["scale_up"]["cooldown"] = 30
-        data["step_scaling_policy"]["scale_down"]["cooldown"] = 60
+        data["step_scaling_policy"]["cooldown"] = 30
         raw = json.dumps(data)
         result = parse_llm_response(raw, warmup_seconds=120, drain_seconds=300)
-        assert result.step_scaling_policy.scale_up.cooldown == 120
-        assert result.step_scaling_policy.scale_down.cooldown == 300
+        assert result.step_scaling_policy.cooldown == 300
 
     def test_invalid_json_raises(self):
         with pytest.raises(ValueError, match="not valid JSON"):
@@ -215,73 +206,62 @@ class TestValidateResponse:
         # Should not raise
         _validate_response(result)
 
-    def test_missing_scale_up_raises(self):
+    def test_missing_steps_raises(self):
         response = LLMAdvisorResponse(
-            step_scaling_policy=LLMStepScalingPolicy(
-                scale_up=LLMScalingDirection(step_adjustments=[]),
-                scale_down=LLMScalingDirection(step_adjustments=[
-                    LLMStepAdjustment(scaling_adjustment=-1),
-                ]),
-            ),
+            step_scaling_policy=LLMStepScalingPolicy(step_adjustments=[]),
         )
-        with pytest.raises(ValueError, match="scale-up"):
+        with pytest.raises(ValueError, match="missing step adjustments"):
             _validate_response(response)
 
     def test_missing_scale_down_raises(self):
         response = LLMAdvisorResponse(
             step_scaling_policy=LLMStepScalingPolicy(
-                scale_up=LLMScalingDirection(step_adjustments=[
+                cooldown=300,
+                step_adjustments=[
                     LLMStepAdjustment(scaling_adjustment=1),
-                ]),
-                scale_down=LLMScalingDirection(step_adjustments=[]),
+                ],
             ),
         )
         with pytest.raises(ValueError, match="scale-down"):
             _validate_response(response)
 
-    def test_positive_scale_down_raises(self):
+    def test_missing_scale_up_raises(self):
         response = LLMAdvisorResponse(
             step_scaling_policy=LLMStepScalingPolicy(
-                scale_up=LLMScalingDirection(cooldown=120, step_adjustments=[
-                    LLMStepAdjustment(scaling_adjustment=1),
-                ]),
-                scale_down=LLMScalingDirection(cooldown=300, step_adjustments=[
-                    LLMStepAdjustment(scaling_adjustment=1),  # wrong: should be negative
-                ]),
-            ),
-        )
-        with pytest.raises(ValueError, match="negative"):
-            _validate_response(response)
-
-    def test_negative_scale_up_raises(self):
-        response = LLMAdvisorResponse(
-            step_scaling_policy=LLMStepScalingPolicy(
-                scale_up=LLMScalingDirection(cooldown=120, step_adjustments=[
-                    LLMStepAdjustment(scaling_adjustment=-1),  # wrong: should be positive
-                ]),
-                scale_down=LLMScalingDirection(cooldown=300, step_adjustments=[
+                cooldown=300,
+                step_adjustments=[
                     LLMStepAdjustment(scaling_adjustment=-1),
-                ]),
+                ],
             ),
         )
-        with pytest.raises(ValueError, match="positive"):
+        with pytest.raises(ValueError, match="scale-up"):
             _validate_response(response)
 
-    def test_cooldown_below_60_raises(self):
+    def test_cooldown_below_minimum_raises(self):
         response = LLMAdvisorResponse(
             step_scaling_policy=LLMStepScalingPolicy(
-                scale_up=LLMScalingDirection(
-                    cooldown=30,
-                    step_adjustments=[LLMStepAdjustment(scaling_adjustment=1)],
-                ),
-                scale_down=LLMScalingDirection(
-                    cooldown=300,
-                    step_adjustments=[LLMStepAdjustment(scaling_adjustment=-1)],
-                ),
+                cooldown=30,
+                step_adjustments=[
+                    LLMStepAdjustment(scaling_adjustment=-1),
+                    LLMStepAdjustment(scaling_adjustment=1),
+                ],
             ),
         )
-        with pytest.raises(ValueError, match="cooldown"):
+        with pytest.raises(ValueError, match="Cooldown"):
             _validate_response(response)
+
+    def test_clamps_negative_bounds(self):
+        response = LLMAdvisorResponse(
+            step_scaling_policy=LLMStepScalingPolicy(
+                cooldown=300,
+                step_adjustments=[
+                    LLMStepAdjustment(metric_interval_lower_bound=-100, metric_interval_upper_bound=0, scaling_adjustment=-1),
+                    LLMStepAdjustment(metric_interval_lower_bound=0, scaling_adjustment=1),
+                ],
+            ),
+        )
+        _validate_response(response)
+        assert response.step_scaling_policy.step_adjustments[0].metric_interval_lower_bound == 0
 
 
 class TestCallLLMAdvisor:
@@ -310,7 +290,7 @@ class TestCallLLMAdvisor:
 
             # Verify the response was parsed
             assert isinstance(result, LLMAdvisorResponse)
-            assert len(result.step_scaling_policy.scale_up.step_adjustments) == 3
+            assert len(result.step_scaling_policy.step_adjustments) == 4
 
     def test_strategy_prompt_included(self):
         """Each strategy should include its specific prompt section."""
@@ -354,7 +334,7 @@ class TestSystemPromptGuardrails:
     def test_contains_safety_guardrail(self):
         assert "SAFETY" in SYSTEM_PROMPT
         assert "scaling to zero" in SYSTEM_PROMPT
-        assert "scale-down policy" in SYSTEM_PROMPT
+        assert "scale-down" in SYSTEM_PROMPT
         assert "60 seconds" in SYSTEM_PROMPT
 
     def test_contains_output_format(self):

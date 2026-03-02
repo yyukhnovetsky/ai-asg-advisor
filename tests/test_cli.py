@@ -16,21 +16,13 @@ from ai_asg_advisor.cli import main
 # A valid LLM response dict for mocking
 MOCK_LLM_RESPONSE_DICT = {
     "step_scaling_policy": {
-        "scale_up": {
-            "adjustment_type": "ChangeInCapacity",
-            "cooldown": 120,
-            "step_adjustments": [
-                {"metric_interval_lower_bound": 0, "metric_interval_upper_bound": 200, "scaling_adjustment": 1},
-                {"metric_interval_lower_bound": 200, "scaling_adjustment": 2},
-            ],
-        },
-        "scale_down": {
-            "adjustment_type": "ChangeInCapacity",
-            "cooldown": 300,
-            "step_adjustments": [
-                {"metric_interval_lower_bound": -100, "metric_interval_upper_bound": 0, "scaling_adjustment": -1},
-            ],
-        },
+        "adjustment_type": "ChangeInCapacity",
+        "cooldown": 300,
+        "step_adjustments": [
+            {"metric_interval_lower_bound": 0, "metric_interval_upper_bound": 100, "scaling_adjustment": -1},
+            {"metric_interval_lower_bound": 100, "metric_interval_upper_bound": 200, "scaling_adjustment": 1},
+            {"metric_interval_lower_bound": 200, "metric_interval_upper_bound": None, "scaling_adjustment": 2},
+        ],
     },
     "instance_recommendations": [],
     "rationale": {
@@ -160,7 +152,7 @@ class TestCLIPipeline:
     def test_text_output(self):
         result = self._run(output_format="text")
         assert result.exit_code == 0
-        assert "SCALE UP" in result.output
+        assert "STEP SCALING POLICY" in result.output
 
     def test_file_output(self, tmp_path):
         outfile = tmp_path / "out.tf"
