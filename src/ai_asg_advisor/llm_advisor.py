@@ -47,6 +47,13 @@ GUARDRAILS:
      (drain in-flight tasks). The scale-down cooldown MUST be >= the
      provided instance_drain_seconds to avoid terminating additional
      instances before previous ones have fully stopped.
+   - METRIC BOUNDS: The metric_interval_lower_bound and
+     metric_interval_upper_bound values represent absolute queue depth
+     thresholds (number of messages). Since queue depth cannot be negative,
+     ALL bounds MUST be >= 0. Use separate scale-up and scale-down policies
+     with non-negative thresholds. For scale-down, use low queue depth
+     thresholds (e.g., 0 to 100 messages) to trigger scale-in when the
+     queue is nearly empty.
 
 4. OUTPUT FORMAT: Return your response strictly as a single JSON object
    matching the output schema below. Do not include any text, markdown
@@ -76,8 +83,8 @@ OUTPUT SCHEMA:
       "cooldown": <int, seconds, >= instance_warmup_seconds>,
       "step_adjustments": [
         {
-          "metric_interval_lower_bound": <number>,
-          "metric_interval_upper_bound": <number or null for unbounded>,
+          "metric_interval_lower_bound": <number >= 0>,
+          "metric_interval_upper_bound": <number >= 0 or null for unbounded>,
           "scaling_adjustment": <positive int>
         }
       ]
@@ -87,8 +94,8 @@ OUTPUT SCHEMA:
       "cooldown": <int, seconds, >= instance_drain_seconds>,
       "step_adjustments": [
         {
-          "metric_interval_lower_bound": <number or null for unbounded>,
-          "metric_interval_upper_bound": <number>,
+          "metric_interval_lower_bound": <number >= 0 or null for unbounded>,
+          "metric_interval_upper_bound": <number >= 0>,
           "scaling_adjustment": <negative int>
         }
       ]
@@ -471,3 +478,19 @@ def _validate_response(response: LLMAdvisorResponse, warmup_seconds: int = 120, 
     for sa in policy.scale_down.step_adjustments:
         if sa.scaling_adjustment >= 0:
             raise ValueError(f"Scale-down adjustment must be negative, got {sa.scaling_adjustment}")
+
+    # Clamp negative bounds to 0 — queue depth cannot be negative
+    for direction in (policy.scale_up, policy.scale_down):
+        for sa in direction.step_adjustments:
+            if sa.metric_interval_lower_bound is not None and sa.metric_interval_lower_bound < 0:
+                logger.warning(
+                    "Clamping negative lower_bound %.0f to 0 (queue depth cannot be negative)",
+                    sa.metric_interval_lower_bound,
+                )
+                sa.metric_interval_lower_bound = 0
+            if sa.metric_interval_upper_bound is not None and sa.metric_interval_upper_bound < 0:
+                logger.warning(
+                    "Clamping negative upper_bound %.0f to 0 (queue depth cannot be negative)",
+                    sa.metric_interval_upper_bound,
+                )
+                sa.metric_interval_upper_bound = 0
