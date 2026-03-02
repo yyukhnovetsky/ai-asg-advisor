@@ -12,8 +12,8 @@ model = "claude-sonnet-4-20250514"
 # base_url = "https://api.anthropic.com"
 
 [aws]
-# AWS CLI profile name (default: ai-adviser)
-profile = "ai-adviser"
+# AWS CLI profile name (default: ai-advisor)
+profile = "ai-advisor"
 
 # IAM role ARN to assume (optional, for EC2 execution)
 # role_arn = "arn:aws:iam::123456789012:role/ai-asg-advisor-role"

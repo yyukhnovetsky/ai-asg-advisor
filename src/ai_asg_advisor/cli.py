@@ -34,7 +34,7 @@ VALID_FORMATS = ("terraform", "json", "text")
     show_default=True,
     help="Optimization strategy.",
 )
-@click.option("--profile", default=None, help="AWS profile name (default: ai-adviser).")
+@click.option("--profile", default=None, help="AWS profile name (default: ai-advisor).")
 @click.option("--role", default=None, help="IAM role ARN or name to assume (for EC2 execution).")
 @click.option("--region", default=None, help="AWS region (default: from config or us-west-1).")
 @click.option(
@@ -110,7 +110,7 @@ def main(
     if profile:
         config.aws.profile = profile
     elif not config.aws.profile and not role:
-        config.aws.profile = "ai-adviser"
+        config.aws.profile = "ai-advisor"
     if role:
         config.aws.role_arn = role
     if region:
