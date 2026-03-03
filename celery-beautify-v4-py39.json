@@ -1,0 +1,86 @@
+{
+  "step_scaling_policy": {
+    "adjustment_type": "ChangeInCapacity",
+    "cooldown": 300,
+    "step_adjustments": [
+      {
+        "scaling_adjustment": -20,
+        "metric_interval_lower_bound": 0,
+        "metric_interval_upper_bound": 50
+      },
+      {
+        "scaling_adjustment": -5,
+        "metric_interval_lower_bound": 50,
+        "metric_interval_upper_bound": 200
+      },
+      {
+        "scaling_adjustment": 3,
+        "metric_interval_lower_bound": 200,
+        "metric_interval_upper_bound": 500
+      },
+      {
+        "scaling_adjustment": 10,
+        "metric_interval_lower_bound": 500,
+        "metric_interval_upper_bound": 1500
+      },
+      {
+        "scaling_adjustment": 20,
+        "metric_interval_lower_bound": 1500,
+        "metric_interval_upper_bound": 5000
+      },
+      {
+        "scaling_adjustment": 40,
+        "metric_interval_lower_bound": 5000,
+        "metric_interval_upper_bound": 15000
+      },
+      {
+        "scaling_adjustment": 60,
+        "metric_interval_lower_bound": 15000,
+        "metric_interval_upper_bound": null
+      }
+    ]
+  },
+  "instance_recommendations": [
+    {
+      "instance_type": "c5a.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.38,
+      "monthly_cost_estimate": 277.4,
+      "savings_vs_current_pct": 10.37,
+      "rationale": "AMD EPYC-based equivalent of c5.2xlarge with identical vCPU/memory specs at ~10% lower cost. Best price-performance ratio for compute-heavy Celery workloads. Drop-in replacement with no architecture change (x86_64)."
+    },
+    {
+      "instance_type": "c6a.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.3816,
+      "monthly_cost_estimate": 278.57,
+      "savings_vs_current_pct": 10.0,
+      "rationale": "Newer-generation AMD compute-optimized instance with improved performance per watt. Nearly identical savings to c5a.2xlarge but on a newer platform, offering better long-term support and marginal performance uplift."
+    },
+    {
+      "instance_type": "c5.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.424,
+      "monthly_cost_estimate": 309.52,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Current baseline instance type. No change required if AMD compatibility is a concern. Proven stable for this workload."
+    },
+    {
+      "instance_type": "c6i.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.424,
+      "monthly_cost_estimate": 309.52,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Same price as c5.2xlarge but newer Intel Ice Lake generation with ~15% better compute performance. Effectively a free performance upgrade at identical cost, which may reduce per-task processing time and indirectly lower required instance count."
+    }
+  ],
+  "rationale": {
+    "scaling_policy": "Steps are aligned with observed queue depth percentiles. The queue is empty 26.5% of the time and has a p50 of ~332, so the first step (0\u201350) aggressively scales down by 20 to shed idle capacity quickly when the queue drains. The 50\u2013200 range provides a moderate scale-down (-5) to gently reduce capacity near the low-activity baseline. Scale-up begins at 200 (below p50) with a conservative +3 to provide early response. The 500\u20131500 step (+10) covers the transition from median to elevated load. The 1500\u20135000 step (+20) handles the bulk of above-average surges. The 5000\u201315000 step (+40) addresses the p95 range (~10,933). The final unbounded step (15000+) adds +60 instances to handle extreme spikes up to the observed max of ~147K. This graduated approach avoids the current policy's problem of a single -100 adjustment that could terminate the entire fleet, while still scaling aggressively enough to handle the wide dynamic range observed (0 to 147K queue depth).",
+    "strategy_impact": "The balanced strategy drives several design choices: (1) Cooldown set to 300s matching the instance_drain_seconds (the binding constraint), which prevents thrashing while allowing response within ~5 minutes. (2) Scale-down is split into two tiers rather than one massive -100 adjustment, preventing catastrophic over-termination while still reducing costs during idle periods. (3) Scale-up thresholds start below p50 to maintain moderate headroom without over-provisioning. (4) Instance recommendation favors c5a.2xlarge for ~10% savings with equivalent specs, balancing cost reduction against compatibility risk. (5) The 7-step policy provides finer granularity than the current 5-step policy, better matching the wide range of observed queue depths to appropriate capacity adjustments.",
+    "risk_notes": "1) The current policies use -100 scaling_adjustment at low queue depth, which can terminate the entire fleet in one action; the new policy mitigates this but operators should verify min_size=1 is enforced. 2) Peak desired capacity was 163 against max_size=250; the current max_size provides adequate headroom but should be monitored if traffic grows. 3) The 300s cooldown means the system can only react every 5 minutes; during the most extreme spikes (147K queue depth), it may take several scaling cycles (~15-20 minutes) to reach full capacity. 4) Switching to c5a.2xlarge (AMD) should be tested for application compatibility before full rollout. 5) Zero-depth percentage is 26.5% (below 80%), so scaling to zero is not recommended; min_size should remain at 1. 6) The observed min_desired of 0 in history suggests the current -100 adjustment has previously scaled the fleet to zero, which the new policy's graduated scale-down is designed to prevent."
+  }
+}
