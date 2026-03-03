@@ -1,0 +1,105 @@
+{
+  "step_scaling_policy": {
+    "adjustment_type": "ChangeInCapacity",
+    "cooldown": 300,
+    "step_adjustments": [
+      {
+        "scaling_adjustment": -50,
+        "metric_interval_lower_bound": 0,
+        "metric_interval_upper_bound": 50
+      },
+      {
+        "scaling_adjustment": -10,
+        "metric_interval_lower_bound": 50,
+        "metric_interval_upper_bound": 150
+      },
+      {
+        "scaling_adjustment": 5,
+        "metric_interval_lower_bound": 150,
+        "metric_interval_upper_bound": 300
+      },
+      {
+        "scaling_adjustment": 15,
+        "metric_interval_lower_bound": 300,
+        "metric_interval_upper_bound": 700
+      },
+      {
+        "scaling_adjustment": 25,
+        "metric_interval_lower_bound": 700,
+        "metric_interval_upper_bound": 2000
+      },
+      {
+        "scaling_adjustment": 40,
+        "metric_interval_lower_bound": 2000,
+        "metric_interval_upper_bound": 5000
+      },
+      {
+        "scaling_adjustment": 60,
+        "metric_interval_lower_bound": 5000,
+        "metric_interval_upper_bound": 15000
+      },
+      {
+        "scaling_adjustment": 80,
+        "metric_interval_lower_bound": 15000,
+        "metric_interval_upper_bound": 50000
+      },
+      {
+        "scaling_adjustment": 100,
+        "metric_interval_lower_bound": 50000,
+        "metric_interval_upper_bound": null
+      }
+    ]
+  },
+  "instance_recommendations": [
+    {
+      "instance_type": "c5.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.424,
+      "monthly_cost_estimate": 309.52,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Current baseline instance. Proven stable with this workload. No migration risk."
+    },
+    {
+      "instance_type": "c7i.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.4452,
+      "monthly_cost_estimate": 325.0,
+      "savings_vs_current_pct": -5.0,
+      "rationale": "4th-gen Xeon Sapphire Rapids offers ~15-20% higher single-thread and throughput performance over c5. For a performance-optimized strategy, faster per-instance processing reduces queue latency and can mean fewer total instance-hours despite a 5% higher unit price. Recommended top pick for performance."
+    },
+    {
+      "instance_type": "c8i.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.4674,
+      "monthly_cost_estimate": 341.23,
+      "savings_vs_current_pct": -10.23,
+      "rationale": "Latest-generation compute-optimized instance with the highest per-core performance available. Best option if maximizing throughput per instance is paramount and the ~10% cost premium is acceptable. Each instance drains the queue faster, reducing peak queue depth and p95/p99 latency."
+    },
+    {
+      "instance_type": "c6i.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.424,
+      "monthly_cost_estimate": 309.52,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Same price as c5.2xlarge but built on 3rd-gen Ice Lake with ~10% better throughput. A no-cost performance uplift and a strong balanced option."
+    },
+    {
+      "instance_type": "c6a.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.3816,
+      "monthly_cost_estimate": 278.57,
+      "savings_vs_current_pct": 10.0,
+      "rationale": "AMD EPYC-based alternative offering comparable performance to c5 at 10% lower cost. Useful if fleet size is large and marginal savings per instance compound significantly across the average 23.77 instances running."
+    }
+  ],
+  "rationale": {
+    "scaling_policy": "The policy is redesigned with 9 granular steps to match the performance-optimization strategy. Key design decisions: (1) Two scale-down steps (0-50 and 50-150) replace the single aggressive -100 at 0-100. The first step at 0-50 still scales down aggressively (-50) to reclaim capacity when the queue is essentially empty, while 50-150 uses a moderate -10 to avoid premature scale-down when a small residual queue remains. This prevents oscillation while still freeing resources quickly. (2) Scale-up begins at the 150-message threshold (lowered from 300 in the current policy) to provide earlier headroom, consistent with the performance strategy. (3) The mid-range is split into finer bands: 300-700 (+15), 700-2000 (+25), and 2000-5000 (+40) to provide proportional response as the queue grows through its median (p50=339) toward its average (~2494). (4) High-burst bands at 5000-15000 (+60) and 15000-50000 (+80) cover the p95 zone (11,325) aggressively. (5) An extreme band at 50000+ adds +100 instances to address the p99 tail (34,428) and observed max (133,414) scenarios, ensuring the ASG can ramp toward its 250 max quickly. The max_desired of 175 is well within the 250 max_size ceiling.",
+    "strategy_impact": "Performance optimization drove several choices: (a) Lower scale-up trigger at 150 messages instead of 300 ensures instances are added before queue depth grows significantly. (b) More aggressive positive adjustments across all bands to minimize time-to-drain. (c) Finer granularity (9 steps vs 5) provides smoother, more responsive scaling that better matches the wide dynamic range (0 to 133K). (d) Instance recommendations favor newer-generation compute-optimized types (c7i, c8i) that offer higher per-core throughput, meaning each instance processes tasks faster and reduces queue latency. (e) The 300s cooldown is set at the minimum safe value (max of 120s warmup, 300s drain) rather than being extended further, allowing the system to react to sustained load increases as quickly as safely possible.",
+    "risk_notes": "1) The 300s cooldown (driven by instance_drain_seconds) means during rapid burst scenarios the ASG can only adjust every 5 minutes; if bursts exceed 50K messages in under 5 minutes, there will be transient latency until enough scaling cycles complete. 2) The -50 scale-down at 0-50 messages is aggressive; if the queue oscillates around 0-50 rapidly, this could cause churn\u2014monitor for frequent launch/terminate cycles. 3) Peak observed desired capacity was 175 against a max of 250; the +100 step at 50K+ could push desired above 175 during extreme events\u2014ensure account EC2 limits and VPC capacity can handle 250 instances. 4) Upgrading to c7i/c8i requires validating AMI compatibility and testing that the application performs correctly on the newer CPU architecture. 5) The min_desired observed was 0, but current min_size is 1, which is appropriate to maintain availability; do not reduce to 0 as zero_depth_pct is only 27.13%."
+  }
+}
