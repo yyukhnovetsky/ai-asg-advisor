@@ -9,18 +9,22 @@ from dataclasses import asdict
 from ai_asg_advisor.llm_advisor import LLMAdvisorResponse, LLMStepAdjustment
 
 
-def format_terraform(response: LLMAdvisorResponse, asg_name: str, warmup_seconds: int = 120) -> str:
+def format_terraform(response: LLMAdvisorResponse, asg_name: str, warmup_seconds: int = 120, drain_seconds: int = 300) -> str:
     """Generate Terraform HCL for a single combined step scaling policy."""
     resource_name = re.sub(r"[^a-zA-Z0-9_]", "_", asg_name)
     policy = response.step_scaling_policy
+
+    # For StepScaling, estimated_instance_warmup is the only timing control
+    # (cooldown is SimpleScaling-only). Use max(warmup, drain) as the warmup
+    # to prevent scaling actions before previous instances are ready or drained.
+    effective_warmup = max(warmup_seconds, drain_seconds)
 
     return _terraform_policy_block(
         resource_name=f"{resource_name}_step_scaling",
         policy_name=f"{asg_name}-step-scaling",
         asg_name=asg_name,
         adjustment_type=policy.adjustment_type,
-        cooldown=policy.cooldown,
-        warmup=warmup_seconds,
+        warmup=effective_warmup,
         step_adjustments=policy.step_adjustments,
     ) + "\n"
 
@@ -80,10 +84,10 @@ def format_text(response: LLMAdvisorResponse, asg_name: str) -> str:
     return "\n".join(lines)
 
 
-def format_output(response: LLMAdvisorResponse, asg_name: str, output_format: str, warmup_seconds: int = 120) -> str:
+def format_output(response: LLMAdvisorResponse, asg_name: str, output_format: str, warmup_seconds: int = 120, drain_seconds: int = 300) -> str:
     """Route to the appropriate formatter based on output_format."""
     if output_format == "terraform":
-        return format_terraform(response, asg_name, warmup_seconds=warmup_seconds)
+        return format_terraform(response, asg_name, warmup_seconds=warmup_seconds, drain_seconds=drain_seconds)
     elif output_format == "json":
         return format_json(response)
     elif output_format == "text":
@@ -99,7 +103,6 @@ def _terraform_policy_block(
     policy_name: str,
     asg_name: str,
     adjustment_type: str,
-    cooldown: int,
     warmup: int,
     step_adjustments: list[LLMStepAdjustment],
 ) -> str:
@@ -111,7 +114,6 @@ def _terraform_policy_block(
         f'  adjustment_type           = "{adjustment_type}"',
         f'  policy_type               = "StepScaling"',
         f'  estimated_instance_warmup = {warmup}',
-        f'  cooldown                  = {cooldown}',
     ]
 
     for sa in step_adjustments:

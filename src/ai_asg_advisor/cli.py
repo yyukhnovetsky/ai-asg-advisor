@@ -195,7 +195,7 @@ def main(
 
     # Step 6: Format output
     click.echo("[6/6] Generating output...", err=True)
-    output = format_output(llm_response, asg, output_format, warmup_seconds=warmup)
+    output = format_output(llm_response, asg, output_format, warmup_seconds=warmup, drain_seconds=drain)
 
     if output_file:
         Path(output_file).write_text(output)

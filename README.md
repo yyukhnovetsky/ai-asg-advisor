@@ -278,8 +278,7 @@ resource "aws_autoscaling_policy" "celery_email_sync_py39_step_scaling" {
   autoscaling_group_name    = "celery-email-sync-py39"
   adjustment_type           = "ChangeInCapacity"
   policy_type               = "StepScaling"
-  estimated_instance_warmup = 120
-  cooldown                  = 300
+  estimated_instance_warmup = 300
 
   step_adjustment {
     metric_interval_lower_bound = 0
