@@ -142,7 +142,7 @@ class TestCLIPipeline:
     def test_terraform_output(self):
         result = self._run(output_format="terraform")
         assert result.exit_code == 0
-        assert 'resource "aws_autoscaling_policy"' in result.output
+        assert "step_adjustments = [" in result.output
 
     def test_json_output(self):
         result = self._run(output_format="json")
@@ -160,7 +160,7 @@ class TestCLIPipeline:
         assert result.exit_code == 0
         assert outfile.exists()
         content = outfile.read_text()
-        assert 'resource "aws_autoscaling_policy"' in content
+        assert 'step_adjustments = [' in content
 
     def test_verbose_flag(self):
         result = self._run(output_format="text", extra_args=["-v"])

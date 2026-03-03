@@ -53,24 +53,19 @@ def _make_response() -> LLMAdvisorResponse:
 
 
 class TestFormatTerraform:
-    def test_generates_single_policy_block(self):
+    def test_generates_step_adjustments_list(self):
         result = format_terraform(_make_response(), "celery-email-sync-py39")
 
-        assert 'resource "aws_autoscaling_policy" "celery_email_sync_py39_step_scaling"' in result
-        assert '"celery-email-sync-py39-step-scaling"' in result
-        assert 'policy_type               = "StepScaling"' in result
-        assert "estimated_instance_warmup = 300" in result
-        assert "cooldown" not in result
-
-    def test_step_adjustments_present(self):
-        result = format_terraform(_make_response(), "celery-email-sync-py39")
-
-        assert "step_adjustment {" in result
-        assert "metric_interval_lower_bound = 0" in result
-        assert "metric_interval_upper_bound = 100" in result
+        assert "step_adjustments = [" in result
         assert "scaling_adjustment          = -100" in result
         assert "scaling_adjustment          = 1" in result
         assert "scaling_adjustment          = 4" in result
+
+    def test_step_bounds_present(self):
+        result = format_terraform(_make_response(), "celery-email-sync-py39")
+
+        assert "metric_interval_lower_bound = 0" in result
+        assert "metric_interval_upper_bound = 100" in result
 
     def test_both_bounds_always_present(self):
         """Every step should have both lower and upper bounds."""
@@ -81,9 +76,11 @@ class TestFormatTerraform:
         # The first step has lower_bound=0
         assert "metric_interval_lower_bound = 0" in result
 
-    def test_sanitizes_resource_name(self):
-        result = format_terraform(_make_response(), "celery-worker-py39")
-        assert "celery_worker_py39_step_scaling" in result
+    def test_no_resource_block(self):
+        """Output should be a module variable, not a full resource block."""
+        result = format_terraform(_make_response(), "celery-email-sync-py39")
+        assert "resource" not in result
+        assert "policy_type" not in result
 
 
 class TestFormatJSON:
@@ -153,7 +150,7 @@ class TestFormatText:
 class TestFormatOutput:
     def test_routes_terraform(self):
         result = format_output(_make_response(), "test-asg", "terraform")
-        assert 'resource "aws_autoscaling_policy"' in result
+        assert "step_adjustments = [" in result
 
     def test_routes_json(self):
         result = format_output(_make_response(), "test-asg", "json")

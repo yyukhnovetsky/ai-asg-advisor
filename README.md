@@ -270,52 +270,41 @@ The data context sent to the LLM follows this structure:
 
 ### Terraform Output
 
-The tool generates ready-to-use Terraform HCL:
+The tool generates a `step_adjustments` list ready to pass into a Terraform module:
 
 ```hcl
-resource "aws_autoscaling_policy" "celery_email_sync_py39_step_scaling" {
-  name                      = "celery-email-sync-py39-step-scaling"
-  autoscaling_group_name    = "celery-email-sync-py39"
-  adjustment_type           = "ChangeInCapacity"
-  policy_type               = "StepScaling"
-  estimated_instance_warmup = 300
-
-  step_adjustment {
-    metric_interval_lower_bound = 0
-    metric_interval_upper_bound = 50
-    scaling_adjustment          = -10
-  }
-
-  step_adjustment {
-    metric_interval_lower_bound = 50
-    metric_interval_upper_bound = 200
-    scaling_adjustment          = -5
-  }
-
-  step_adjustment {
-    metric_interval_lower_bound = 200
-    metric_interval_upper_bound = 500
-    scaling_adjustment          = 3
-  }
-
-  step_adjustment {
-    metric_interval_lower_bound = 500
-    metric_interval_upper_bound = 1500
-    scaling_adjustment          = 10
-  }
-
-  step_adjustment {
-    metric_interval_lower_bound = 1500
-    metric_interval_upper_bound = 5000
-    scaling_adjustment          = 20
-  }
-
-  step_adjustment {
-    metric_interval_lower_bound = 5000
-    metric_interval_upper_bound = null
-    scaling_adjustment          = 40
-  }
-}
+  step_adjustments = [
+    {
+      scaling_adjustment          = -10
+      metric_interval_lower_bound = 0
+      metric_interval_upper_bound = 50
+    },
+    {
+      scaling_adjustment          = -5
+      metric_interval_lower_bound = 50
+      metric_interval_upper_bound = 200
+    },
+    {
+      scaling_adjustment          = 3
+      metric_interval_lower_bound = 200
+      metric_interval_upper_bound = 500
+    },
+    {
+      scaling_adjustment          = 10
+      metric_interval_lower_bound = 500
+      metric_interval_upper_bound = 1500
+    },
+    {
+      scaling_adjustment          = 20
+      metric_interval_lower_bound = 1500
+      metric_interval_upper_bound = 5000
+    },
+    {
+      scaling_adjustment          = 40
+      metric_interval_lower_bound = 5000
+      metric_interval_upper_bound = null
+    },
+  ]
 ```
 
 ## Installation

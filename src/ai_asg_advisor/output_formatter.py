@@ -3,30 +3,27 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import asdict
 
 from ai_asg_advisor.llm_advisor import LLMAdvisorResponse, LLMStepAdjustment
 
 
 def format_terraform(response: LLMAdvisorResponse, asg_name: str, warmup_seconds: int = 120, drain_seconds: int = 300) -> str:
-    """Generate Terraform HCL for a single combined step scaling policy."""
-    resource_name = re.sub(r"[^a-zA-Z0-9_]", "_", asg_name)
+    """Generate Terraform HCL step_adjustments list for use in a module variable."""
     policy = response.step_scaling_policy
 
-    # For StepScaling, estimated_instance_warmup is the only timing control
-    # (cooldown is SimpleScaling-only). Use max(warmup, drain) as the warmup
-    # to prevent scaling actions before previous instances are ready or drained.
-    effective_warmup = max(warmup_seconds, drain_seconds)
+    lines = ["  step_adjustments = ["]
+    for sa in policy.step_adjustments:
+        lower = _tf_number(sa.metric_interval_lower_bound if sa.metric_interval_lower_bound is not None else 0)
+        upper = _tf_number(sa.metric_interval_upper_bound) if sa.metric_interval_upper_bound is not None else "null"
+        lines.append("    {")
+        lines.append(f"      scaling_adjustment          = {sa.scaling_adjustment}")
+        lines.append(f"      metric_interval_lower_bound = {lower}")
+        lines.append(f"      metric_interval_upper_bound = {upper}")
+        lines.append("    },")
+    lines.append("  ]")
 
-    return _terraform_policy_block(
-        resource_name=f"{resource_name}_step_scaling",
-        policy_name=f"{asg_name}-step-scaling",
-        asg_name=asg_name,
-        adjustment_type=policy.adjustment_type,
-        warmup=effective_warmup,
-        step_adjustments=policy.step_adjustments,
-    ) + "\n"
+    return "\n".join(lines) + "\n"
 
 
 def format_json(response: LLMAdvisorResponse) -> str:
@@ -97,39 +94,6 @@ def format_output(response: LLMAdvisorResponse, asg_name: str, output_format: st
 
 
 # -- Internal helpers --
-
-def _terraform_policy_block(
-    resource_name: str,
-    policy_name: str,
-    asg_name: str,
-    adjustment_type: str,
-    warmup: int,
-    step_adjustments: list[LLMStepAdjustment],
-) -> str:
-    """Generate a single Terraform aws_autoscaling_policy resource block."""
-    lines = [
-        f'resource "aws_autoscaling_policy" "{resource_name}" {{',
-        f'  name                      = "{policy_name}"',
-        f'  autoscaling_group_name    = "{asg_name}"',
-        f'  adjustment_type           = "{adjustment_type}"',
-        f'  policy_type               = "StepScaling"',
-        f'  estimated_instance_warmup = {warmup}',
-    ]
-
-    for sa in step_adjustments:
-        lines.append("")
-        lines.append("  step_adjustment {")
-        lines.append(f"    metric_interval_lower_bound = {_tf_number(sa.metric_interval_lower_bound if sa.metric_interval_lower_bound is not None else 0)}")
-        if sa.metric_interval_upper_bound is not None:
-            lines.append(f"    metric_interval_upper_bound = {_tf_number(sa.metric_interval_upper_bound)}")
-        else:
-            lines.append(f"    metric_interval_upper_bound = null")
-        lines.append(f"    scaling_adjustment          = {sa.scaling_adjustment}")
-        lines.append("  }")
-
-    lines.append("}")
-    return "\n".join(lines)
-
 
 def _tf_number(value: float) -> str:
     """Format a number for Terraform — integers as ints, floats as floats."""
