@@ -4,12 +4,12 @@
     "cooldown": 300,
     "step_adjustments": [
       {
-        "scaling_adjustment": -20,
+        "scaling_adjustment": -10,
         "metric_interval_lower_bound": 0,
         "metric_interval_upper_bound": 50
       },
       {
-        "scaling_adjustment": -5,
+        "scaling_adjustment": -3,
         "metric_interval_lower_bound": 50,
         "metric_interval_upper_bound": 300
       },
@@ -26,16 +26,16 @@
       {
         "scaling_adjustment": 30,
         "metric_interval_lower_bound": 5000,
-        "metric_interval_upper_bound": 12000
+        "metric_interval_upper_bound": 11000
       },
       {
         "scaling_adjustment": 50,
-        "metric_interval_lower_bound": 12000,
-        "metric_interval_upper_bound": 35000
+        "metric_interval_lower_bound": 11000,
+        "metric_interval_upper_bound": 31000
       },
       {
         "scaling_adjustment": 80,
-        "metric_interval_lower_bound": 35000,
+        "metric_interval_lower_bound": 31000,
         "metric_interval_upper_bound": null
       }
     ]
@@ -48,7 +48,7 @@
       "price_per_hour": 0.38,
       "monthly_cost_estimate": 277.4,
       "savings_vs_current_pct": 10.37,
-      "rationale": "AMD EPYC-based alternative with identical vCPU/memory specs at ~10% lower cost. Best price-performance ratio among all alternatives. Ideal for compute-heavy Celery workers where marginal single-thread performance differences between Intel and AMD are negligible for task processing throughput."
+      "rationale": "AMD EPYC-based equivalent of c5.2xlarge with identical vCPU/memory specs. Offers the lowest cost per instance at $0.38/hr \u2014 a ~10.4% savings. For compute-bound Celery tasks the AMD variant delivers comparable throughput, making it the best price-performance option for a balanced strategy."
     },
     {
       "instance_type": "c6a.2xlarge",
@@ -57,7 +57,7 @@
       "price_per_hour": 0.3816,
       "monthly_cost_estimate": 278.57,
       "savings_vs_current_pct": 10.0,
-      "rationale": "Newer-generation AMD (3rd gen EPYC) with slightly better per-core performance than c5a at nearly the same price point. Offers a good balance of cost savings and improved IPC, making it a strong second choice."
+      "rationale": "Newer-generation AMD (Zen 3) offering slightly better per-core performance than c5a at nearly the same price. Provides a good balance of modern architecture benefits and cost savings (~10%). A solid alternative if c5a availability is limited."
     },
     {
       "instance_type": "c5.2xlarge",
@@ -66,7 +66,7 @@
       "price_per_hour": 0.424,
       "monthly_cost_estimate": 309.52,
       "savings_vs_current_pct": 0.0,
-      "rationale": "Current baseline instance type. No migration risk or compatibility concerns. Retain as fallback if AMD-based instances exhibit any application-specific incompatibilities."
+      "rationale": "Current baseline instance type. Well-proven for this workload with known performance characteristics. No cost change; included as a reference point."
     },
     {
       "instance_type": "c6i.2xlarge",
@@ -75,12 +75,12 @@
       "price_per_hour": 0.424,
       "monthly_cost_estimate": 309.52,
       "savings_vs_current_pct": 0.0,
-      "rationale": "Same price as c5.2xlarge but with 3rd gen Intel Xeon (Ice Lake) offering ~15% better compute per core. No cost savings but better throughput per instance, which can reduce the number of instances needed at peak, indirectly lowering fleet cost."
+      "rationale": "Intel Ice Lake generation \u2014 same price as c5.2xlarge but with improved per-core IPC. Offers better performance at the same cost, which can indirectly reduce required instance count at peak. Worth considering if workload benefits from single-thread improvements."
     }
   ],
   "rationale": {
-    "scaling_policy": "The step thresholds are aligned with observed queue depth percentiles. The p50 is ~310 messages, so the boundary at 300 separates the median steady-state from scale-up territory. Below 50 messages (well under the ~28% zero-depth periods), aggressive scale-down (-20) reclaims capacity quickly. The 50-300 band applies moderate scale-down (-5) to avoid oscillation around the median. Scale-up steps at 1000, 5000, 12000, and 35000 correspond roughly to increasing severity: 1000 is above p50 indicating building backlog, 5000 approaches p95 (~11.5k), 12000 exceeds p95 requiring aggressive response, and 35000 exceeds p99 (~32.4k) triggering maximum scale-out of +80 to handle extreme bursts up to the observed max of ~115k. The current policy's -100 scale-down at 0-100 is dangerously aggressive and risks scaling to near-zero too fast; the revised two-tier scale-down (0-50 and 50-300) is more graduated.",
-    "strategy_impact": "The balanced strategy favors moderate cooldowns and percentile-aligned thresholds. The 300-second cooldown equals the instance drain time (the binding constraint), ensuring instances fully drain before further terminations, while also exceeding the 120s warmup. The graduated scale-down avoids the current policy's all-or-nothing -100 adjustment which can cause capacity whiplash. Scale-up steps are sized to reach the observed max_desired of 181 within 2-3 scaling actions for extreme bursts, keeping queue latency manageable without over-provisioning. Instance recommendations prioritize the c5a.2xlarge for ~10% savings with equivalent specs, consistent with a balanced cost-performance approach.",
-    "risk_notes": "1) The observed max_desired of 181 is within the max_size of 250, providing adequate headroom; do not reduce max_size below 181. 2) The 27.58% zero-depth period is well below the 80% threshold, so scaling to zero is not recommended; min_size should remain at 1. 3) Switching to AMD-based instances (c5a/c6a) should be validated with a canary deployment to confirm no application-level incompatibilities. 4) The current policies have null/0 cooldown which risks runaway scaling; the 300s cooldown is critical to prevent launch storms during rapid queue depth fluctuations. 5) Peak traffic at 22:00 UTC with trough at 06:00 UTC suggests a predictable daily pattern; if workload becomes more predictable, consider adding a scheduled scaling action to pre-warm capacity before peak hours to complement this reactive policy."
+    "scaling_policy": "Steps are aligned to observed queue depth percentiles. The queue is at zero ~27% of the time and p50 is ~321 messages, so the first step (0\u201350) aggressively scales down by 10 when the queue is nearly empty, and a moderate scale-down of 3 covers the 50\u2013300 range (below median). The 300\u20131000 range (median to moderate load) adds 5 instances incrementally. The 1000\u20135000 range covers the bulk of above-average traffic with +15. The 5000\u201311000 step (+30) targets the approach to p95 (~10,955). The 11000\u201331000 step (+50) handles the p95-to-p99 surge zone (~31,025). The final unbounded step (+80) handles extreme spikes (max observed ~156K) to rapidly scale toward the max_size of 250. Compared to the current policy, the key improvements are: (1) graduated scale-down instead of a single -100 jump that could terminate the entire fleet, (2) more granular scale-up bands matching actual traffic distribution, and (3) a proper 300s cooldown respecting the drain period.",
+    "strategy_impact": "The balanced strategy drove several choices: cooldown is set to 300s (matching the drain period, the binding constraint) rather than an aggressive lower value \u2014 this prevents thrashing while still being responsive enough for a queue with p95 near 11K. Scale-down is split into two tiers to avoid over-termination during brief lulls (26.6% zero-depth suggests frequent but short idle periods). Instance type recommendations prioritize the c5a.2xlarge for its ~10% savings with equivalent specs, rather than pushing to cheaper burstable types or more expensive newer generations. The step thresholds avoid over-provisioning by keeping moderate adjustments in the common operating range (300\u20135000) while reserving aggressive scaling for genuine spikes.",
+    "risk_notes": "1) The current policies use -100 scaling_adjustment which can terminate up to 100 instances at once \u2014 this is extremely dangerous and risks service disruption if the queue refills during cooldown. The recommended graduated scale-down mitigates this. 2) The observed max_desired of 161 is well below max_size of 250, which provides adequate headroom. 3) min_desired was observed at 0 but zero_depth_pct is only 26.6%, so scaling to 0 should be avoided; the ASG min_size of 1 provides a safety net. 4) With a 300s cooldown, rapid queue spikes from 0 to 150K+ may take multiple scaling cycles (~15-20 min) to fully address; if latency SLAs are tight during such events, consider reducing cooldown but be aware of drain period constraints. 5) Switching to c5a.2xlarge (AMD) should be tested to confirm application compatibility, particularly for any workloads with x86 micro-architecture dependencies."
   }
 }
