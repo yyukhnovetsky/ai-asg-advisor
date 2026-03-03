@@ -3,8 +3,7 @@ resource "aws_autoscaling_policy" "celery_beautify_v4_py39_step_scaling" {
   autoscaling_group_name    = "celery-beautify-v4-py39"
   adjustment_type           = "ChangeInCapacity"
   policy_type               = "StepScaling"
-  estimated_instance_warmup = 120
-  cooldown                  = 300
+  estimated_instance_warmup = 300
 
   step_adjustment {
     metric_interval_lower_bound = 0
@@ -14,42 +13,36 @@ resource "aws_autoscaling_policy" "celery_beautify_v4_py39_step_scaling" {
 
   step_adjustment {
     metric_interval_lower_bound = 50
-    metric_interval_upper_bound = 200
-    scaling_adjustment          = -5
+    metric_interval_upper_bound = 300
+    scaling_adjustment          = -3
   }
 
   step_adjustment {
-    metric_interval_lower_bound = 200
-    metric_interval_upper_bound = 350
-    scaling_adjustment          = 0
-  }
-
-  step_adjustment {
-    metric_interval_lower_bound = 350
+    metric_interval_lower_bound = 300
     metric_interval_upper_bound = 1000
-    scaling_adjustment          = 8
+    scaling_adjustment          = 5
   }
 
   step_adjustment {
     metric_interval_lower_bound = 1000
     metric_interval_upper_bound = 5000
-    scaling_adjustment          = 20
+    scaling_adjustment          = 15
   }
 
   step_adjustment {
     metric_interval_lower_bound = 5000
-    metric_interval_upper_bound = 11200
-    scaling_adjustment          = 40
+    metric_interval_upper_bound = 12000
+    scaling_adjustment          = 30
   }
 
   step_adjustment {
-    metric_interval_lower_bound = 11200
-    metric_interval_upper_bound = 35000
-    scaling_adjustment          = 60
+    metric_interval_lower_bound = 12000
+    metric_interval_upper_bound = 40000
+    scaling_adjustment          = 50
   }
 
   step_adjustment {
-    metric_interval_lower_bound = 35000
+    metric_interval_lower_bound = 40000
     metric_interval_upper_bound = null
     scaling_adjustment          = 80
   }
