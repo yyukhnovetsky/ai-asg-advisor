@@ -19,7 +19,7 @@ AI ASG Advisor collects historical metrics (RabbitMQ queue depth, ASG capacity) 
 │  --queue email_sync_v2                                       │
 │  --period 2w                                                 │
 │  --strategy balanced|cost|performance                        │
-│  --profile ai-adviser | --role ai-advisor-role               │
+│  --profile ai-advisor | --role ai-advisor-role               │
 └──────────────────────┬───────────────────────────────────────┘
                        │
            ┌───────────▼───────────┐
@@ -147,22 +147,26 @@ GUARDRAILS:
      queue depth for >80% of the analysis period.
    - Never recommend a max_size lower than the observed peak
      desired_capacity.
-   - Always include a scale-down policy alongside scale-up.
+   - Always include both scale-down (negative adjustment) and scale-up
+     (positive adjustment) steps within the single policy.
    - Minimum cooldown period: 60 seconds.
+   - Cooldown MUST be >= max(instance_warmup_seconds, instance_drain_seconds).
+   - All metric bounds MUST be >= 0 (queue depth cannot be negative).
+   - Every step MUST have both metric_interval_lower_bound and
+     metric_interval_upper_bound (use 0 for lowest, null for unbounded).
 
 4. OUTPUT FORMAT: Return responses strictly as JSON matching the defined
    output schema. Do not include commentary outside the JSON structure.
 
 5. INSTANCE TYPES:
-   - Only recommend instance types available in the target region.
-   - Only recommend instance types from the same or adjacent compute
-     category (general-purpose, compute-optimized).
+   - Only recommend instance types from the provided alternatives list.
    - Always include the current instance type as a baseline option.
-   - Include price-per-hour for every recommended type.
+   - Include price-per-hour for every recommended type (from provided data).
 
 6. COST ESTIMATES:
    - Use the provided pricing data only. Do not guess prices.
-   - Express savings as both percentage and absolute monthly estimate.
+   - Express savings as both percentage and absolute monthly estimate
+     relative to the current instance type.
 
 7. PROHIBITED:
    - No infrastructure provisioning or modification suggestions beyond
@@ -181,7 +185,9 @@ The data context sent to the LLM follows this structure:
     "asg_name": "celery-email-sync-py39",
     "queue_name": "email_sync_v2",
     "period": "2w",
-    "strategy": "balanced"
+    "strategy": "balanced",
+    "instance_warmup_seconds": 120,
+    "instance_drain_seconds": 300
   },
   "queue_metrics": {
     "metric_name": "rabbitmq_detailed_queue_messages_ready",
@@ -232,40 +238,32 @@ The data context sent to the LLM follows this structure:
 ```json
 {
   "step_scaling_policy": {
-    "scale_up": {
-      "adjustment_type": "ChangeInCapacity",
-      "cooldown": 120,
-      "step_adjustments": [
-        { "metric_interval_lower_bound": 0,    "metric_interval_upper_bound": 200,  "scaling_adjustment": 1 },
-        { "metric_interval_lower_bound": 200,  "metric_interval_upper_bound": 500,  "scaling_adjustment": 2 },
-        { "metric_interval_lower_bound": 500,  "metric_interval_upper_bound": 1000, "scaling_adjustment": 4 },
-        { "metric_interval_lower_bound": 1000, "scaling_adjustment": 6 }
-      ]
-    },
-    "scale_down": {
-      "adjustment_type": "ChangeInCapacity",
-      "cooldown": 300,
-      "step_adjustments": [
-        { "metric_interval_lower_bound": -100, "metric_interval_upper_bound": 0,  "scaling_adjustment": -1 },
-        { "metric_interval_lower_bound": -500, "metric_interval_upper_bound": -100, "scaling_adjustment": -2 }
-      ]
-    }
+    "adjustment_type": "ChangeInCapacity",
+    "cooldown": 300,
+    "step_adjustments": [
+      { "metric_interval_lower_bound": 0,    "metric_interval_upper_bound": 50,   "scaling_adjustment": -10 },
+      { "metric_interval_lower_bound": 50,   "metric_interval_upper_bound": 200,  "scaling_adjustment": -5 },
+      { "metric_interval_lower_bound": 200,  "metric_interval_upper_bound": 500,  "scaling_adjustment": 3 },
+      { "metric_interval_lower_bound": 500,  "metric_interval_upper_bound": 1500, "scaling_adjustment": 10 },
+      { "metric_interval_lower_bound": 1500, "metric_interval_upper_bound": 5000, "scaling_adjustment": 20 },
+      { "metric_interval_lower_bound": 5000, "metric_interval_upper_bound": null,  "scaling_adjustment": 40 }
+    ]
   },
   "instance_recommendations": [
     {
-      "instance_type": "m6g.xlarge",
-      "vcpu": 4,
+      "instance_type": "c5a.2xlarge",
+      "vcpu": 8,
       "memory_gb": 16,
-      "price_per_hour": 0.154,
-      "monthly_cost_estimate": 110.88,
-      "savings_vs_current_pct": 19.8,
-      "rationale": "Graviton-based equivalent; compatible with Python workloads."
+      "price_per_hour": 0.38,
+      "monthly_cost_estimate": 277.40,
+      "savings_vs_current_pct": 10.37,
+      "rationale": "AMD EPYC-based equivalent with identical specs at ~10% lower cost."
     }
   ],
   "rationale": {
-    "scaling_policy": "Queue depth p95 is 520 messages. ...",
-    "strategy_impact": "Balanced strategy applied: ...",
-    "risk_notes": "Peak capacity reached 18/20 max. Consider raising max_size to 25."
+    "scaling_policy": "Steps aligned with observed queue depth percentiles. ...",
+    "strategy_impact": "Balanced strategy: moderate cooldowns, graduated steps. ...",
+    "risk_notes": "Peak capacity reached 163/250 max. Queue zero 26.5% of time."
   }
 }
 ```
@@ -275,34 +273,48 @@ The data context sent to the LLM follows this structure:
 The tool generates ready-to-use Terraform HCL:
 
 ```hcl
-resource "aws_autoscaling_policy" "celery_email_sync_scale_up" {
-  name                   = "celery-email-sync-py39-scale-up"
-  autoscaling_group_name = "celery-email-sync-py39"
-  adjustment_type        = "ChangeInCapacity"
-  policy_type            = "StepScaling"
+resource "aws_autoscaling_policy" "celery_email_sync_py39_step_scaling" {
+  name                      = "celery-email-sync-py39-step-scaling"
+  autoscaling_group_name    = "celery-email-sync-py39"
+  adjustment_type           = "ChangeInCapacity"
+  policy_type               = "StepScaling"
   estimated_instance_warmup = 120
+  cooldown                  = 300
 
   step_adjustment {
     metric_interval_lower_bound = 0
+    metric_interval_upper_bound = 50
+    scaling_adjustment          = -10
+  }
+
+  step_adjustment {
+    metric_interval_lower_bound = 50
     metric_interval_upper_bound = 200
-    scaling_adjustment          = 1
+    scaling_adjustment          = -5
   }
 
   step_adjustment {
     metric_interval_lower_bound = 200
     metric_interval_upper_bound = 500
-    scaling_adjustment          = 2
+    scaling_adjustment          = 3
   }
 
   step_adjustment {
     metric_interval_lower_bound = 500
-    metric_interval_upper_bound = 1000
-    scaling_adjustment          = 4
+    metric_interval_upper_bound = 1500
+    scaling_adjustment          = 10
   }
 
   step_adjustment {
-    metric_interval_lower_bound = 1000
-    scaling_adjustment          = 6
+    metric_interval_lower_bound = 1500
+    metric_interval_upper_bound = 5000
+    scaling_adjustment          = 20
+  }
+
+  step_adjustment {
+    metric_interval_lower_bound = 5000
+    metric_interval_upper_bound = null
+    scaling_adjustment          = 40
   }
 }
 ```
@@ -333,16 +345,23 @@ See [`config.toml.example`](config.toml.example) for all available settings.
 
 | Environment | Method | CLI Flag |
 |-------------|--------|----------|
-| Local | Named profile | `--profile ai-adviser` (default) |
+| Local | Named profile | `--profile ai-advisor` (default) |
 | EC2 | IAM role assumption | `--role ai-advisor-role` or `--role arn:aws:iam::123456789012:role/...` |
 | Default chain | Environment / instance metadata | omit `--profile` and `--role` |
 
 ### Claude API Key
 
-Set via environment variable (recommended):
+Set via environment variables (recommended):
 
 ```bash
+# API key (either variable works; ANTHROPIC_AUTH_TOKEN takes precedence)
+export ANTHROPIC_AUTH_TOKEN="sk-ant-..."
+# or
 export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Optional: custom model and base URL
+export ANTHROPIC_MODEL="claude-sonnet-4-20250514"
+export ANTHROPIC_BASE_URL="https://api.anthropic.com"
 ```
 
 Or in the config file (`~/.config/ai-asg-advisor/config.toml`):
@@ -351,6 +370,7 @@ Or in the config file (`~/.config/ai-asg-advisor/config.toml`):
 [llm]
 api_key = "sk-ant-..."
 model = "claude-sonnet-4-20250514"
+# base_url = "https://api.anthropic.com"
 ```
 
 ## Usage
@@ -417,10 +437,13 @@ ai-asg-advisor \
 | `--strategy` | Optimization strategy (`cost`, `balanced`, `performance`) | `balanced` |
 | `--format` | Output format (`terraform`, `json`, `text`) | `terraform` |
 | `--output` | Write output to file instead of stdout | — |
-| `--profile` | AWS CLI profile name | `ai-adviser` |
+| `--profile` | AWS CLI profile name | `ai-advisor` |
 | `--role` | IAM role ARN or short name to assume | — |
 | `--region` | AWS region | `us-west-1` |
 | `--namespace` | CloudWatch metrics namespace (`cloudamqp/fat-plum-goat`, `CloudAMQP/metrics`) | `cloudamqp/fat-plum-goat` |
+| `--use-graviton` | Include Graviton (ARM64) instance types (`yes`, `no`) | `no` |
+| `--warmup` | Instance warmup time in seconds (time for new EC2 to be ready) | `120` |
+| `--drain` | Instance drain time in seconds (lifecycle hook for graceful shutdown) | `300` |
 | `--config` | Path to config file | `~/.config/ai-asg-advisor/config.toml` |
 | `-v, --verbose` | Enable debug logging to stderr | off |
 | `--version` | Show version and exit | — |
