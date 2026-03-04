@@ -1,0 +1,91 @@
+{
+  "step_scaling_policy": {
+    "adjustment_type": "ChangeInCapacity",
+    "cooldown": 300,
+    "step_adjustments": [
+      {
+        "scaling_adjustment": -3,
+        "metric_interval_lower_bound": 0,
+        "metric_interval_upper_bound": 10
+      },
+      {
+        "scaling_adjustment": -1,
+        "metric_interval_lower_bound": 10,
+        "metric_interval_upper_bound": 50
+      },
+      {
+        "scaling_adjustment": 2,
+        "metric_interval_lower_bound": 50,
+        "metric_interval_upper_bound": 150
+      },
+      {
+        "scaling_adjustment": 4,
+        "metric_interval_lower_bound": 150,
+        "metric_interval_upper_bound": 300
+      },
+      {
+        "scaling_adjustment": 6,
+        "metric_interval_lower_bound": 300,
+        "metric_interval_upper_bound": 600
+      },
+      {
+        "scaling_adjustment": 8,
+        "metric_interval_lower_bound": 600,
+        "metric_interval_upper_bound": 1200
+      },
+      {
+        "scaling_adjustment": 12,
+        "metric_interval_lower_bound": 1200,
+        "metric_interval_upper_bound": 5000
+      },
+      {
+        "scaling_adjustment": 15,
+        "metric_interval_lower_bound": 5000,
+        "metric_interval_upper_bound": null
+      }
+    ]
+  },
+  "instance_recommendations": [
+    {
+      "instance_type": "c5.xlarge",
+      "vcpu": 4,
+      "memory_gb": 8.0,
+      "price_per_hour": 0.212,
+      "monthly_cost_estimate": 154.76,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Current baseline instance. Compute-optimized with known-good performance for this workload. No migration risk."
+    },
+    {
+      "instance_type": "c7i.xlarge",
+      "vcpu": 4,
+      "memory_gb": 8.0,
+      "price_per_hour": 0.2226,
+      "monthly_cost_estimate": 162.5,
+      "savings_vs_current_pct": -5.0,
+      "rationale": "Recommended for performance strategy. 4th-gen Intel Sapphire Rapids offers ~15% better single-thread and throughput performance over c5. The 5% cost increase is offset by faster task processing, reducing queue dwell time and potentially requiring fewer peak instances."
+    },
+    {
+      "instance_type": "c8i.xlarge",
+      "vcpu": 4,
+      "memory_gb": 8.0,
+      "price_per_hour": 0.2337,
+      "monthly_cost_estimate": 170.62,
+      "savings_vs_current_pct": -10.24,
+      "rationale": "Highest single-core performance option available. 5th-gen Intel offers ~25% improvement over c5 generation. Best choice if minimizing queue latency is the top priority and the workload is CPU-bound. The 10% premium per instance may be partially recovered by needing fewer instances at peak."
+    },
+    {
+      "instance_type": "c6i.xlarge",
+      "vcpu": 4,
+      "memory_gb": 8.0,
+      "price_per_hour": 0.212,
+      "monthly_cost_estimate": 154.76,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Same price as c5.xlarge but newer Ice Lake architecture with ~10% better throughput. A no-cost upgrade path that improves processing speed without any budget impact."
+    }
+  ],
+  "rationale": {
+    "scaling_policy": "The policy is designed for aggressive scale-up with more granular steps to minimize queue latency, per the performance optimization strategy. Key design choices: (1) Scale-down starts only when queue depth is near zero (0-10 messages), with a moderate -3 adjustment to quickly shed idle capacity given 83% zero-depth time. A second scale-down band (10-50) with -1 provides cautious reduction to maintain headroom. (2) Scale-up triggers early at just 50 messages (down from the current 100) to build capacity before backlogs grow. (3) The upper steps are significantly more aggressive than the current policy \u2014 at 1200+ messages the adjustment is +12 and at 5000+ it is +15, reflecting the data showing extreme spikes up to ~146K messages. The p99 of ~109K and peak desired capacity of 50 confirm the workload has sharp bursts requiring rapid scaling. (4) The 300s cooldown respects the instance_drain_seconds constraint (max of 120s warmup, 300s drain) and ensures instances are fully drained before further scale-down, and fully warmed before further scale-up decisions.",
+    "strategy_impact": "Performance optimization drove three main decisions: (a) lower scale-up thresholds (50 messages vs. previous 100) to reduce time-to-react, (b) higher scaling adjustments at every tier to overshoot capacity and burn through queue backlogs faster, and (c) instance type recommendations favor newer-generation compute-optimized instances (c7i, c8i, c6i) that deliver better per-core throughput even at higher cost. The max_size of 50 was observed to be fully utilized, so no reduction is recommended \u2014 if anything, the aggressive adjustments may benefit from a higher max_size in the future.",
+    "risk_notes": "1) The 300s cooldown is required by the drain constraint but may delay reaction to rapid successive bursts; monitor for cases where queue grows during cooldown windows. 2) The aggressive +15 adjustment at 5000+ messages could push near the max_size=50 limit quickly \u2014 consider increasing max_size to 60-70 if peak spikes remain at ~146K. 3) Queue is at zero 83% of the time but does NOT meet the >80% sustained zero threshold for scaling to zero, and min_size=1 is retained. 4) Switching to c7i/c8i requires validating AMI compatibility and application dependencies on the newer instance families. 5) Two duplicate policies exist (scale-on-celery-meeting-briefs-py39-queue and scale-on-meeting_briefs) with identical configurations \u2014 this may cause conflicting scaling actions; consolidate to a single policy."
+  }
+}
