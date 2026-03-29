@@ -364,11 +364,44 @@ model = "claude-sonnet-4-20250514"
 ## Usage
 
 ```bash
-# Basic: analyze with balanced strategy, output Terraform HCL
+# Basic: analyze with balanced strategy, output Terraform to stdout
 ai-asg-advisor \
   --asg celery-email-sync-py39 \
   --queue email_sync_v2 \
   --period 2w
+
+# Generate both Terraform and JSON outputs to files
+ai-asg-advisor \
+  --asg celery-email-sync-py39 \
+  --queue email_sync_v2 \
+  --period 2w \
+  --format terraform \
+  --output results/celery-email-sync-py39.tf
+
+ai-asg-advisor \
+  --asg celery-email-sync-py39 \
+  --queue email_sync_v2 \
+  --period 2w \
+  --format json \
+  --output results/celery-email-sync-py39.json
+
+# Performance strategy with 1-month lookback, writing to files
+ai-asg-advisor \
+  --asg celery-beautify-v4-py39 \
+  --queue beautify_v4 \
+  --period 1m \
+  --strategy performance \
+  --format terraform \
+  --output results/celery-beautify-v4-py39-performance.tf
+
+# ASG in a different region (default is us-west-1)
+ai-asg-advisor \
+  --asg celery-transcription-v3-usw2-py39 \
+  --queue transcription_v3 \
+  --period 1m \
+  --region us-west-2 \
+  --format terraform \
+  --output results/celery-transcription-v3-usw2-py39.tf
 
 # Cost-optimized analysis, JSON output
 ai-asg-advisor \
@@ -377,15 +410,6 @@ ai-asg-advisor \
   --period 1m \
   --strategy cost \
   --format json
-
-# Performance-optimized, write to file
-ai-asg-advisor \
-  --asg celery-email-sync-py39 \
-  --queue email_sync_v2 \
-  --period 2w \
-  --strategy performance \
-  --format terraform \
-  --output scaling_policy.tf
 
 # Human-readable text summary
 ai-asg-advisor \
@@ -401,11 +425,20 @@ ai-asg-advisor \
   --period 2w \
   --role ai-advisor-role
 
-# Specify region and custom config file
+# Include Graviton (ARM64) instance types in recommendations
 ai-asg-advisor \
   --asg celery-email-sync-py39 \
   --queue email_sync_v2 \
-  --region eu-west-1 \
+  --period 2w \
+  --use-graviton yes
+
+# Custom warmup/drain times and config file
+ai-asg-advisor \
+  --asg celery-email-sync-py39 \
+  --queue email_sync_v2 \
+  --period 2w \
+  --warmup 180 \
+  --drain 600 \
   --config ./my-config.toml
 
 # Verbose logging (debug output to stderr)
