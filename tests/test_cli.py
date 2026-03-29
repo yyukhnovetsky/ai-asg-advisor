@@ -7,11 +7,9 @@ import unittest.mock as mock
 from contextlib import ExitStack
 from datetime import datetime, timezone
 
-import pytest
 from click.testing import CliRunner
 
 from ai_asg_advisor.cli import main
-
 
 # A valid LLM response dict for mocking
 MOCK_LLM_RESPONSE_DICT = {
@@ -80,8 +78,8 @@ class TestCLIValidation:
 
 def _setup_pipeline_mocks(stack: ExitStack):
     """Set up all mocks for the full pipeline and return the mock objects."""
-    from ai_asg_advisor.cloudwatch_collector import MetricTimeSeries
     from ai_asg_advisor.asg_collector import ASGConfig
+    from ai_asg_advisor.cloudwatch_collector import MetricTimeSeries
     from ai_asg_advisor.instance_collector import InstanceRecommendations, InstanceTypeInfo
     from ai_asg_advisor.llm_advisor import parse_llm_response
 

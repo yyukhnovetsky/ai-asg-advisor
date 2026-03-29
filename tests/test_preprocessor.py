@@ -6,13 +6,10 @@ from datetime import datetime, timezone
 
 import pytest
 
+from ai_asg_advisor.asg_collector import ASGConfig, ScalingPolicy
 from ai_asg_advisor.cloudwatch_collector import MetricTimeSeries
-from ai_asg_advisor.asg_collector import ASGConfig, ScalingPolicy, StepAdjustment
 from ai_asg_advisor.preprocessor import (
     AnalysisContext,
-    HourlyPattern,
-    QueueDepthSummary,
-    TimeSeriesStats,
     build_analysis_context,
     compute_hourly_pattern,
     compute_stats,

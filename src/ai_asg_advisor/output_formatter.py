@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
 
-from ai_asg_advisor.llm_advisor import LLMAdvisorResponse, LLMStepAdjustment
+from ai_asg_advisor.llm_advisor import LLMAdvisorResponse
 
 
 def format_terraform(response: LLMAdvisorResponse, asg_name: str, warmup_seconds: int = 120, drain_seconds: int = 300) -> str:

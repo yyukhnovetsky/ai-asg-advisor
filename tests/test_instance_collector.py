@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import unittest.mock as mock
 
 import boto3
@@ -15,7 +14,6 @@ from ai_asg_advisor.instance_collector import (
     _is_relevant_alternative,
     _parse_instance_type,
     enrich_with_pricing,
-    find_alternative_types,
     get_instance_recommendations,
     get_instance_type_info,
 )

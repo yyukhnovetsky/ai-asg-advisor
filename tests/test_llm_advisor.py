@@ -4,26 +4,22 @@ from __future__ import annotations
 
 import json
 import unittest.mock as mock
-from datetime import datetime, timezone
 
 import pytest
 
 from ai_asg_advisor.asg_collector import ASGConfig, ScalingPolicy, StepAdjustment
-from ai_asg_advisor.cloudwatch_collector import MetricTimeSeries
 from ai_asg_advisor.config import LLMConfig
 from ai_asg_advisor.instance_collector import InstanceRecommendations, InstanceTypeInfo
 from ai_asg_advisor.llm_advisor import (
-    LLMAdvisorResponse,
-    LLMInstanceRecommendation,
-    LLMRationale,
-    LLMStepAdjustment,
-    LLMStepScalingPolicy,
     STRATEGY_PROMPTS,
     SYSTEM_PROMPT,
+    LLMAdvisorResponse,
+    LLMStepAdjustment,
+    LLMStepScalingPolicy,
+    _validate_response,
     build_llm_input,
     call_llm_advisor,
     parse_llm_response,
-    _validate_response,
 )
 from ai_asg_advisor.preprocessor import (
     AnalysisContext,
@@ -32,7 +28,6 @@ from ai_asg_advisor.preprocessor import (
     QueueDepthSummary,
     TimeSeriesStats,
 )
-
 
 # -- Fixtures --
 

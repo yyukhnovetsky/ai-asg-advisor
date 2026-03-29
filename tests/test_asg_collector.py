@@ -2,21 +2,15 @@
 
 from __future__ import annotations
 
-import unittest.mock as mock
-
 import boto3
 import pytest
 from botocore.stub import Stubber
 
 from ai_asg_advisor.asg_collector import (
-    ASGConfig,
-    ScalingPolicy,
-    StepAdjustment,
     get_asg_config,
     get_scaling_policies,
     list_celery_asgs,
 )
-
 
 # -- Fixtures / helpers --
 

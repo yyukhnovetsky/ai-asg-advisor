@@ -8,9 +8,8 @@ import sys
 import click
 
 from ai_asg_advisor import __version__
-from ai_asg_advisor.config import load_config
-
 from ai_asg_advisor.cloudwatch_collector import DEFAULT_QUEUE_NAMESPACE, VALID_QUEUE_NAMESPACES
+from ai_asg_advisor.config import load_config
 
 VALID_PERIODS = ("1w", "2w", "3w", "1m", "2m")
 VALID_STRATEGIES = ("cost", "balanced", "performance")
@@ -135,13 +134,13 @@ def main(
     click.echo(err=True)
 
     # -- Pipeline --
-    from ai_asg_advisor.aws_auth import create_session, get_client, get_pricing_client, verify_credentials
-    from ai_asg_advisor.cloudwatch_collector import get_queue_depth_metrics, get_asg_capacity_metrics
     from ai_asg_advisor.asg_collector import get_asg_config, get_scaling_policies
+    from ai_asg_advisor.aws_auth import create_session, get_client, get_pricing_client, verify_credentials
+    from ai_asg_advisor.cloudwatch_collector import get_asg_capacity_metrics, get_queue_depth_metrics
     from ai_asg_advisor.instance_collector import get_instance_recommendations
-    from ai_asg_advisor.preprocessor import build_analysis_context
     from ai_asg_advisor.llm_advisor import call_llm_advisor
     from ai_asg_advisor.output_formatter import format_output
+    from ai_asg_advisor.preprocessor import build_analysis_context
 
     # Step 1: Authenticate
     click.echo("[1/6] Authenticating with AWS...", err=True)

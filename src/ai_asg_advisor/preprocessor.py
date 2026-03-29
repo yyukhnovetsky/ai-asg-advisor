@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import math
 import logging
+import math
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 
-from ai_asg_advisor.cloudwatch_collector import MetricTimeSeries
 from ai_asg_advisor.asg_collector import ASGConfig, ScalingPolicy
+from ai_asg_advisor.cloudwatch_collector import MetricTimeSeries
 
 logger = logging.getLogger(__name__)
 

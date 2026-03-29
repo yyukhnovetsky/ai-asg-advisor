@@ -10,9 +10,8 @@ from botocore.stub import Stubber
 
 from ai_asg_advisor.cloudwatch_collector import (
     DEFAULT_QUEUE_NAMESPACE,
-    MetricTimeSeries,
     OTEL_LIB_DIMENSION,
-    PERIOD_MAP,
+    MetricTimeSeries,
     get_asg_capacity_metrics,
     get_queue_depth_metrics,
     parse_period,
