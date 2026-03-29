@@ -1,0 +1,96 @@
+{
+  "step_scaling_policy": {
+    "adjustment_type": "ChangeInCapacity",
+    "cooldown": 300,
+    "step_adjustments": [
+      {
+        "scaling_adjustment": -15,
+        "metric_interval_lower_bound": 0,
+        "metric_interval_upper_bound": 20
+      },
+      {
+        "scaling_adjustment": -5,
+        "metric_interval_lower_bound": 20,
+        "metric_interval_upper_bound": 50
+      },
+      {
+        "scaling_adjustment": 5,
+        "metric_interval_lower_bound": 50,
+        "metric_interval_upper_bound": 100
+      },
+      {
+        "scaling_adjustment": 15,
+        "metric_interval_lower_bound": 100,
+        "metric_interval_upper_bound": 300
+      },
+      {
+        "scaling_adjustment": 30,
+        "metric_interval_lower_bound": 300,
+        "metric_interval_upper_bound": 800
+      },
+      {
+        "scaling_adjustment": 60,
+        "metric_interval_lower_bound": 800,
+        "metric_interval_upper_bound": 2000
+      },
+      {
+        "scaling_adjustment": 100,
+        "metric_interval_lower_bound": 2000,
+        "metric_interval_upper_bound": 5000
+      },
+      {
+        "scaling_adjustment": 200,
+        "metric_interval_lower_bound": 5000,
+        "metric_interval_upper_bound": 15000
+      },
+      {
+        "scaling_adjustment": 350,
+        "metric_interval_lower_bound": 15000,
+        "metric_interval_upper_bound": null
+      }
+    ]
+  },
+  "instance_recommendations": [
+    {
+      "instance_type": "c5.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.34,
+      "monthly_cost_estimate": 248.2,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Current baseline instance. Compute-optimized C5 family, well-suited for transcription CPU workloads. Known-good configuration with no migration risk."
+    },
+    {
+      "instance_type": "c7i.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.357,
+      "monthly_cost_estimate": 260.61,
+      "savings_vs_current_pct": -5.0,
+      "rationale": "Top performance recommendation. 4th-gen Intel Sapphire Rapids delivers ~15-20% higher single-threaded and multi-threaded throughput over C5, meaning each instance processes transcription tasks faster. The 5% cost premium is offset by needing fewer instances at peak and reduced queue latency. Best choice for a performance-first strategy."
+    },
+    {
+      "instance_type": "c8i.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.3748,
+      "monthly_cost_estimate": 273.63,
+      "savings_vs_current_pct": -10.25,
+      "rationale": "Latest-generation Intel compute-optimized. Offers the highest per-core throughput of all options, potentially ~25-30% faster than C5 for CPU-bound transcription. Higher unit cost but maximizes per-instance processing rate, reducing overall fleet size needed at peak. Best raw performance option if budget allows."
+    },
+    {
+      "instance_type": "c6i.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.34,
+      "monthly_cost_estimate": 248.2,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Same price as C5 but uses 3rd-gen Intel Ice Lake with ~10-15% better compute throughput. A no-cost upgrade path that improves queue processing speed without any pricing penalty. Strong balanced choice."
+    }
+  ],
+  "rationale": {
+    "scaling_policy": "The policy uses 9 granular steps to enable aggressive, early scale-up optimized for queue latency reduction. Key design decisions: (1) Scale-down triggers at very low queue depth (<20 messages) with -15 adjustment to reclaim capacity quickly when the queue is truly idle, and a gentler -5 at 20-50 to avoid premature downsizing. (2) Scale-up begins at just 50 messages (below the p50 of ~49), ensuring instances are added proactively before the queue backs up. (3) The steps at 100-300 (+15) and 300-800 (+30) cover the typical operating range aggressively. (4) At 800-2000 messages (+60) we match the current policy's mid-tier aggressiveness. (5) The upper tiers at 2000-5000 (+100), 5000-15000 (+200), and 15000+ (+350) handle the extreme spikes seen in the data (max ~148K messages, p99 ~13K) with very aggressive scaling to rapidly deploy capacity. The 350 adjustment at 15000+ is designed to get ahead of massive bursts, given the observed max_desired of ~1547 instances. Compared to the current policy: thresholds are lower (earlier reaction), more steps provide finer granularity, and upper-tier adjustments are much more aggressive to handle the heavy tail.",
+    "strategy_impact": "Performance optimization strategy drove several key choices: (1) Scale-up threshold starts at 50 messages rather than the current 100, adding headroom so instances are launched before the queue depth reaches median levels. (2) More granular steps (9 vs 5) give faster, proportional responses across the full range of queue depths. (3) Upper-tier scale-up adjustments (200, 350) are significantly more aggressive than the current policy's maximum of 100 to rapidly reduce latency during burst events. (4) Instance type recommendations favor newer-generation compute-optimized instances (c7i, c8i, c6i) that deliver higher per-core throughput even at slightly higher cost. (5) The cooldown of 300s (matching the drain time minimum) is the tightest safe value, allowing the ASG to react as quickly as possible while respecting warmup and drain constraints.",
+    "risk_notes": "1) The 300s cooldown (driven by instance_drain_seconds) means the ASG can only adjust every 5 minutes, which is a hard floor; during sudden massive spikes (e.g., 0\u2192148K) there will be an unavoidable multi-minute lag before full capacity is deployed. 2) The aggressive upper-tier adjustments (+200, +350) could overshoot if a spike is transient, potentially launching hundreds of instances that are no longer needed; the scale-down steps will handle this but with the 300s cooldown it will take multiple cycles. 3) The max_size of 1800 remains the ceiling; the most aggressive step (+350) at extreme depths could hit this limit in 4-5 scaling cycles. 4) Migrating to c7i/c8i/c6i requires verifying AMI compatibility and that the transcription application has no c5-specific dependencies. 5) The current policy has a 0s cooldown which, while unsafe, does allow faster chained scaling events; moving to 300s is safer but will slow multi-step scaling compared to the current (broken) behavior. 6) Zero-depth percentage is only 22.6%, well below the 80% threshold, so scaling to zero is not recommended and min_size should remain at 1."
+  }
+}
