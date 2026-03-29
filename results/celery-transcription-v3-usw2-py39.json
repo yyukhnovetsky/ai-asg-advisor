@@ -1,0 +1,86 @@
+{
+  "step_scaling_policy": {
+    "adjustment_type": "ChangeInCapacity",
+    "cooldown": 300,
+    "step_adjustments": [
+      {
+        "scaling_adjustment": -20,
+        "metric_interval_lower_bound": 0,
+        "metric_interval_upper_bound": 50
+      },
+      {
+        "scaling_adjustment": -5,
+        "metric_interval_lower_bound": 50,
+        "metric_interval_upper_bound": 100
+      },
+      {
+        "scaling_adjustment": 10,
+        "metric_interval_lower_bound": 100,
+        "metric_interval_upper_bound": 500
+      },
+      {
+        "scaling_adjustment": 25,
+        "metric_interval_lower_bound": 500,
+        "metric_interval_upper_bound": 1500
+      },
+      {
+        "scaling_adjustment": 60,
+        "metric_interval_lower_bound": 1500,
+        "metric_interval_upper_bound": 7000
+      },
+      {
+        "scaling_adjustment": 120,
+        "metric_interval_lower_bound": 7000,
+        "metric_interval_upper_bound": 18000
+      },
+      {
+        "scaling_adjustment": 200,
+        "metric_interval_lower_bound": 18000,
+        "metric_interval_upper_bound": null
+      }
+    ]
+  },
+  "instance_recommendations": [
+    {
+      "instance_type": "c6a.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.306,
+      "monthly_cost_estimate": 223.38,
+      "savings_vs_current_pct": 10.0,
+      "rationale": "Best price-performance option. Same 8 vCPU / 16 GB spec as c5.2xlarge on AMD EPYC (Milan) with ~10% cost reduction. Drop-in replacement for compute-bound transcription workloads with equivalent or better single-thread performance than c5."
+    },
+    {
+      "instance_type": "c5a.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.308,
+      "monthly_cost_estimate": 224.84,
+      "savings_vs_current_pct": 9.41,
+      "rationale": "Second-best cost option on AMD EPYC (Rome). Nearly identical savings to c6a. Useful as a secondary capacity pool in a mixed-instance policy to improve Spot or on-demand availability."
+    },
+    {
+      "instance_type": "c5.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.34,
+      "monthly_cost_estimate": 248.2,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Current baseline instance type. Well-proven for this workload. Retain as fallback in a mixed-instance policy if c6a availability is constrained."
+    },
+    {
+      "instance_type": "c6i.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.34,
+      "monthly_cost_estimate": 248.2,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Same price as c5.2xlarge but on newer Ice Lake platform with ~15% better compute throughput. No cost savings but offers better per-instance processing, which could reduce required capacity at peak. Good diversification option."
+    }
+  ],
+  "rationale": {
+    "scaling_policy": "Steps are aligned to observed queue depth percentiles. The p50 is ~53 messages, so the first step (0\u201350) triggers aggressive scale-down (-20) when the queue is at or below median emptiness, covering the 23.3% zero-depth periods plus near-empty states. The 50\u2013100 band provides a gentler scale-down (-5) as a buffer zone around the p50, preventing oscillation. The 100\u2013500 band starts moderate scale-up (+10) for above-median load. The 500\u20131500 band (approaching p95 of 1471) ramps to +25. The 1500\u20137000 band matches the previous policy's aggressive tier at +60 for sustained high load. Two high-burst tiers at 7000\u201318000 (+120) and 18000+ (+200) address the extreme p99 (17621) and observed max (170238) spikes, providing faster response than the current single +100 step above 7000. This balanced approach avoids over-provisioning at low queue depths while ensuring rapid scale-up during transcription bursts.",
+    "strategy_impact": "The balanced strategy drives several choices: (1) Cooldown set to 300s, matching the instance_drain_seconds (the binding constraint over the 120s warmup), providing enough time for graceful shutdown and warm-up without excessive lag during rapid queue growth. (2) The scale-down steps are split into two tiers (-20 and -5) rather than a single aggressive step, reducing cost during idle periods while avoiding premature termination that could cause latency spikes if the queue rebounds. (3) Instance recommendation favors c6a.2xlarge\u2014the cheapest option with equivalent specs\u2014over newer/faster but pricier generations, prioritizing the price-performance ratio. (4) Scale-up steps are more granular than the current policy (7 steps vs 5), better matching the wide dynamic range (0 to 170K messages) to avoid both under- and over-provisioning.",
+    "risk_notes": "1) The max_desired observed is 1708, which is within the current max_size of 1800\u2014headroom is only ~5%. If traffic grows, max_size may need increasing. 2) Cooldown of 300s means during extreme burst events (queue >170K), it takes multiple cooldown cycles to fully scale up; ensure the CloudWatch alarm evaluation period is short (60s) to trigger successive scaling actions promptly. 3) Switching to c6a.2xlarge requires validation that the application and any native dependencies (e.g., transcription model binaries) are compatible with AMD EPYC architecture. 4) The 23.3% zero-depth period is below the 80% threshold, so scaling to zero is not recommended\u2014min_size should remain at 1. 5) With avg_desired of ~172 instances, a 10% per-instance savings on c6a translates to significant fleet-wide savings (~$4,243/month at average utilization), but actual savings depend on Spot vs On-Demand mix and reserved instance commitments."
+  }
+}
