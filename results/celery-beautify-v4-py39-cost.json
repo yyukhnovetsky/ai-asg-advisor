@@ -4,7 +4,7 @@
     "cooldown": 300,
     "step_adjustments": [
       {
-        "scaling_adjustment": -40,
+        "scaling_adjustment": -50,
         "metric_interval_lower_bound": 0,
         "metric_interval_upper_bound": 50
       },
@@ -26,26 +26,21 @@
       {
         "scaling_adjustment": 15,
         "metric_interval_lower_bound": 1500,
-        "metric_interval_upper_bound": 3500
+        "metric_interval_upper_bound": 4000
       },
       {
         "scaling_adjustment": 30,
-        "metric_interval_lower_bound": 3500,
-        "metric_interval_upper_bound": 7000
+        "metric_interval_lower_bound": 4000,
+        "metric_interval_upper_bound": 10000
       },
       {
         "scaling_adjustment": 50,
-        "metric_interval_lower_bound": 7000,
-        "metric_interval_upper_bound": 15000
+        "metric_interval_lower_bound": 10000,
+        "metric_interval_upper_bound": 25000
       },
       {
         "scaling_adjustment": 70,
-        "metric_interval_lower_bound": 15000,
-        "metric_interval_upper_bound": 40000
-      },
-      {
-        "scaling_adjustment": 90,
-        "metric_interval_lower_bound": 40000,
+        "metric_interval_lower_bound": 25000,
         "metric_interval_upper_bound": null
       }
     ]
@@ -58,7 +53,7 @@
       "price_per_hour": 0.38,
       "monthly_cost_estimate": 277.4,
       "savings_vs_current_pct": 10.37,
-      "rationale": "AMD-based variant of c5 with identical vCPU/memory specs at 10.4% lower cost. Direct drop-in replacement for c5.2xlarge with no architecture change (x86_64). Best cost-per-instance option available."
+      "rationale": "AMD-based equivalent of c5.2xlarge with identical vCPU/memory specs. Offers the lowest per-instance cost among all alternatives at $0.38/hr, providing ~10.4% savings per instance. AMD EPYC processors handle compute-heavy Celery workloads effectively with negligible performance difference for most task types."
     },
     {
       "instance_type": "c6a.2xlarge",
@@ -67,7 +62,7 @@
       "price_per_hour": 0.3816,
       "monthly_cost_estimate": 278.57,
       "savings_vs_current_pct": 10.0,
-      "rationale": "Newer-generation AMD instance with slightly better price-performance than c5a. Nearly identical pricing to c5a.2xlarge but with improved compute from 3rd Gen AMD EPYC processors. Good alternative if c5a capacity is limited in your AZ."
+      "rationale": "Newer-generation AMD instance (Zen 3) at nearly the same price as c5a.2xlarge. Offers improved per-core performance over c5a, which could translate to slightly faster task processing and marginally fewer instances needed. Savings of ~10% per instance with a generational performance uplift."
     },
     {
       "instance_type": "c5.2xlarge",
@@ -76,12 +71,12 @@
       "price_per_hour": 0.424,
       "monthly_cost_estimate": 309.52,
       "savings_vs_current_pct": 0.0,
-      "rationale": "Current baseline instance type. No savings but zero migration risk. Keep as fallback in a mixed-instance policy if preferred alternatives have insufficient capacity."
+      "rationale": "Current baseline instance type. No migration effort required. Recommended as fallback if AMD compatibility has not been validated for the beautify_v4 workload."
     }
   ],
   "rationale": {
-    "scaling_policy": "The policy was redesigned around the observed queue depth distribution. The median queue depth is ~1,043 messages and the average is ~1,850, so scale-up thresholds were raised compared to the current policy to avoid premature provisioning. Scale-down is triggered aggressively: below 50 messages (near-empty queue) removes up to 40 instances, 50-200 removes 15, and 200-500 removes 5, ensuring rapid de-provisioning when demand drops. Scale-up begins only above 500 messages (well below the median) with a modest +5, increasing through higher thresholds aligned to p50 (1,500), p95 (~5,600 mapped to the 3,500-7,000 band), and p99 (~8,400 in the 7,000-15,000 band). The top two steps handle burst scenarios up to and beyond the observed max of ~43,000. Fewer aggressive scale-up steps and higher thresholds reduce instance churn and over-provisioning, accepting slightly higher queue latency during ramp-up in exchange for significant cost savings.",
-    "strategy_impact": "Cost optimization strategy drove several decisions: (1) Cooldown set to 300s (matching the instance_drain_seconds maximum) which slows both scale-up and scale-down reactions\u2014this prevents rapid oscillation and reduces wasted partial-hour billing from short-lived instances. (2) Scale-down adjustments are large and start at low queue depths to shed capacity quickly when demand falls. (3) Scale-up thresholds are raised (first scale-up at 500 vs. the current 150) so the ASG tolerates moderate queue backlogs before adding instances, reducing average fleet size. (4) c5a.2xlarge recommended as primary instance type, saving ~10.4% per instance with identical specs. At the average fleet size of ~53 instances, switching to c5a.2xlarge saves approximately $1,702/month (~$20,400/year). (5) Reduced scale-up aggressiveness across the board means lower peak instance counts during moderate demand spikes.",
-    "risk_notes": "1) The 300s cooldown applies to both scale-up and scale-down; during sudden traffic spikes the ASG may take longer to reach adequate capacity, temporarily increasing queue latency. The observed max desired of ~160 instances and max queue depth of ~43K suggest infrequent but significant bursts that may queue longer under this policy. 2) The aggressive scale-down step of -40 when queue < 50 could cause rapid capacity drops; the min_size of 1 provides a safety floor, but re-scaling after an aggressive scale-down will take multiple cooldown cycles. 3) c5a.2xlarge uses AMD EPYC processors\u2014verify that the Celery beautify workload has no Intel-specific optimizations (e.g., AVX-512 or MKL dependencies). 4) Zero-depth percentage is only 1.39%, meaning the queue is almost always occupied; this validates keeping min_size at 1 rather than 0. 5) Max capacity should remain at 250 as observed peak desired was ~160, leaving headroom for growth."
+    "scaling_policy": "The policy is redesigned around the observed queue depth distribution. The median queue depth is ~1,547 messages and the average is ~2,379, so the neutral/low-growth zone is set around 500-1,500 messages to avoid unnecessary scaling during normal load. Aggressive scale-down steps at 0-50 (adjustment -50) and 50-200 (adjustment -15) ensure rapid cost reduction when the queue drains, which aligns with the cost optimization strategy. The scale-up thresholds are raised compared to the current policy: meaningful scale-up only begins at 500+ messages (above the lower quartile), with progressively larger additions at 4,000+ and 10,000+ to handle the p95 (6,535) and p99 (14,019) surges. The top step (25,000+, adjustment +70) covers extreme peaks up to the observed max of ~42,827. Scale-up steps are deliberately fewer and with higher thresholds to prefer tolerating slightly longer queue latency over launching expensive capacity prematurely. The cooldown is set to 300 seconds, matching the instance_drain_seconds (the maximum of warmup=120s and drain=300s), ensuring instances fully drain before further terminations and fully warm up before further launches.",
+    "strategy_impact": "Cost optimization strategy drove several key decisions: (1) Scale-down steps are aggressive with large negative adjustments (-50, -15, -5) to shed capacity quickly when demand drops, minimizing idle instance hours. (2) Scale-up thresholds are raised (starting at 500 vs the previous 150) to tolerate moderate queue buildup rather than immediately adding expensive instances. (3) The 300s cooldown prevents thrashing which wastes money on premature launches/terminations. (4) Instance recommendations prioritize the cheapest alternatives (c5a.2xlarge and c6a.2xlarge), both offering ~10% per-instance savings. At an average fleet size of ~61 instances, switching to c5a.2xlarge saves approximately $61 \u00d7 $32.12/month \u2248 $1,959/month. Combined with the tighter scaling policy reducing average fleet size, total monthly savings could be substantial.",
+    "risk_notes": "1) The 300s cooldown means the ASG cannot react to rapid queue spikes for 5 minutes after any scaling action. During flash surges (observed max ~42,827), this could temporarily increase queue latency. Monitor p99 task completion times after deployment. 2) The aggressive -50 scale-down at 0-50 messages could overshoot if the queue refills quickly; the min_size=1 guardrail prevents scaling to zero, but rapid oscillation between low and high capacity is possible during bursty patterns. Consider monitoring scaling event frequency. 3) Switching to c5a.2xlarge (AMD) requires validation that the beautify_v4 Python workload has no x86 Intel-specific dependencies (e.g., MKL-optimized libraries). Test thoroughly before fleet-wide rollout. 4) The observed peak desired capacity of ~159 instances is well below the max_size of 250, so the current max_size remains safe and should not be lowered. 5) Zero-depth percentage is only 1.66%, confirming the queue is almost always active\u2014scaling to zero is not recommended."
   }
 }
