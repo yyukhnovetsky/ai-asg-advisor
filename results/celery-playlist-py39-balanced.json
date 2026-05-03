@@ -1,0 +1,81 @@
+{
+  "step_scaling_policy": {
+    "adjustment_type": "ChangeInCapacity",
+    "cooldown": 300,
+    "step_adjustments": [
+      {
+        "scaling_adjustment": -3,
+        "metric_interval_lower_bound": 0,
+        "metric_interval_upper_bound": 10
+      },
+      {
+        "scaling_adjustment": -1,
+        "metric_interval_lower_bound": 10,
+        "metric_interval_upper_bound": 500
+      },
+      {
+        "scaling_adjustment": 2,
+        "metric_interval_lower_bound": 500,
+        "metric_interval_upper_bound": 10000
+      },
+      {
+        "scaling_adjustment": 4,
+        "metric_interval_lower_bound": 10000,
+        "metric_interval_upper_bound": 100000
+      },
+      {
+        "scaling_adjustment": 8,
+        "metric_interval_lower_bound": 100000,
+        "metric_interval_upper_bound": 1000000
+      },
+      {
+        "scaling_adjustment": 12,
+        "metric_interval_lower_bound": 1000000,
+        "metric_interval_upper_bound": null
+      }
+    ]
+  },
+  "instance_recommendations": [
+    {
+      "instance_type": "c5a.xlarge",
+      "vcpu": 4,
+      "memory_gb": 8.0,
+      "price_per_hour": 0.19,
+      "monthly_cost_estimate": 138.7,
+      "savings_vs_current_pct": 10.38,
+      "rationale": "AMD EPYC-based equivalent of c5.xlarge with identical vCPU/memory specs. Offers the lowest cost per instance at $0.19/hr, providing ~10.4% savings. Best price-performance ratio for CPU-bound Celery workloads. Recommended as primary choice for balanced strategy."
+    },
+    {
+      "instance_type": "c6a.xlarge",
+      "vcpu": 4,
+      "memory_gb": 8.0,
+      "price_per_hour": 0.1908,
+      "monthly_cost_estimate": 139.28,
+      "savings_vs_current_pct": 10.0,
+      "rationale": "Newer-generation AMD-based compute-optimized instance. Nearly identical pricing to c5a.xlarge but with improved per-core performance from 3rd-gen AMD EPYC processors. Excellent price-performance balance and a strong second choice."
+    },
+    {
+      "instance_type": "c5.xlarge",
+      "vcpu": 4,
+      "memory_gb": 8.0,
+      "price_per_hour": 0.212,
+      "monthly_cost_estimate": 154.76,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Current baseline instance type. Proven stable with existing workload. No savings but included as reference. Consider migrating to c5a.xlarge or c6a.xlarge for cost reduction with equivalent capability."
+    },
+    {
+      "instance_type": "c6i.xlarge",
+      "vcpu": 4,
+      "memory_gb": 8.0,
+      "price_per_hour": 0.212,
+      "monthly_cost_estimate": 154.76,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Intel Ice Lake generation with improved per-core performance over c5.xlarge at the same price. If staying with Intel is preferred, this offers better throughput per instance which could reduce the number of instances needed during peaks, yielding indirect cost savings."
+    }
+  ],
+  "rationale": {
+    "scaling_policy": "The step thresholds are designed around the observed queue depth distribution which is highly bimodal: 48.27% of the time the queue is at or near zero, while peaks reach ~2.9M messages. The p50 is 0.05 (essentially zero) and p95 is ~960K. Scale-down steps: 0-10 messages triggers aggressive scale-down (-3) since this reflects the near-empty state seen ~48% of the time, allowing rapid cost reduction; 10-500 messages triggers gentle scale-down (-1) as the queue is low but not empty. Scale-up steps are graduated across the enormous range: 500-10K (+2) handles early queue buildup; 10K-100K (+4) for moderate load; 100K-1M (+8) for heavy load approaching p95; and 1M+ (+12) for extreme bursts approaching the observed max of ~2.9M, ensuring rapid scale-up to the max of 61 instances. The current policy's thresholds (max step at 1000+) are far too low given observed depths regularly exceeding 1M, resulting in the same +5 adjustment whether depth is 1K or 2.9M. The new policy provides much more granular response across the actual observed range.",
+    "strategy_impact": "The balanced strategy drove several decisions: (1) Cooldown set to 300s matching the instance_drain_seconds (the binding constraint over the 120s warmup), providing stability without excessive delay. This prevents thrashing during the frequent transitions between zero and high queue depth. (2) Scale-down is moderately aggressive (-3 at near-zero) since the queue spends ~48% of time empty \u2014 waiting too long wastes money on idle instances. (3) Scale-up steps are aggressive at higher thresholds to prevent queue latency from spiraling during the dramatic spikes observed (avg ~231K messages). (4) Instance recommendations prioritize price-performance: c5a.xlarge offers 10.4% savings with equivalent specs, providing meaningful cost reduction across the ~24.7 average instance count (~$396/month savings fleet-wide).",
+    "risk_notes": "1) The 300s cooldown means the system takes at minimum 5 minutes between scaling actions. Given the extreme burst pattern (0 to millions), there may be periods where the queue grows significantly before enough scale-up actions complete. Monitor if the max_size of 61 is sufficient. 2) The observed max_desired of 61 equals max_size, suggesting the ASG has been capacity-constrained at peak. Consider increasing max_size if queue depths regularly exceed 1M with 61 instances running. 3) Switching instance types (e.g., to c5a.xlarge) should be validated with a canary deployment to confirm Celery worker performance parity. 4) The queue spends ~48% at zero but is NOT at zero >80% of the time, so scaling to zero is not recommended and min_size of 1 is appropriate. 5) The bimodal distribution (near-zero or very high) suggests batch/scheduled workloads \u2014 if predictable, consider supplementing reactive scaling with scheduled scaling actions for known peak hours (around 10:00 UTC)."
+  }
+}
