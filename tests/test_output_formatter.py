@@ -26,6 +26,7 @@ def _make_response() -> LLMAdvisorResponse:
         step_scaling_policy=LLMStepScalingPolicy(
             adjustment_type="ChangeInCapacity",
             cooldown=300,
+            estimated_instance_warmup=120,
             step_adjustments=[
                 LLMStepAdjustment(metric_interval_lower_bound=0, metric_interval_upper_bound=100, scaling_adjustment=-100),
                 LLMStepAdjustment(metric_interval_lower_bound=100, metric_interval_upper_bound=200, scaling_adjustment=1),
@@ -82,6 +83,10 @@ class TestFormatTerraform:
         assert "resource" not in result
         assert "policy_type" not in result
 
+    def test_estimated_instance_warmup_present(self):
+        result = format_terraform(_make_response(), "celery-email-sync-py39")
+        assert "estimated_instance_warmup = 120" in result
+
 
 class TestFormatJSON:
     def test_valid_json(self):
@@ -99,6 +104,7 @@ class TestFormatJSON:
         policy = data["step_scaling_policy"]
         assert policy["adjustment_type"] == "ChangeInCapacity"
         assert policy["cooldown"] == 300
+        assert policy["estimated_instance_warmup"] == 120
         steps = policy["step_adjustments"]
         assert len(steps) == 4
         assert steps[0]["scaling_adjustment"] == -100
@@ -131,6 +137,7 @@ class TestFormatText:
     def test_contains_scale_up_and_down(self):
         result = format_text(_make_response(), "celery-email-sync-py39")
         assert "STEP SCALING POLICY" in result
+        assert "warmup=120s" in result
         assert "+1 instances" in result
         assert "+4 instances" in result
         assert "-100 instances" in result

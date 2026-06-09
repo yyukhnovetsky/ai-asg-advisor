@@ -108,6 +108,7 @@ VALID_LLM_RESPONSE = {
     "step_scaling_policy": {
         "adjustment_type": "ChangeInCapacity",
         "cooldown": 300,
+        "estimated_instance_warmup": 120,
         "step_adjustments": [
             {"metric_interval_lower_bound": 0, "metric_interval_upper_bound": 100, "scaling_adjustment": -100},
             {"metric_interval_lower_bound": 100, "metric_interval_upper_bound": 200, "scaling_adjustment": 1},
@@ -172,6 +173,7 @@ class TestParseLLMResponse:
         policy = result.step_scaling_policy
         assert len(policy.step_adjustments) == 4
         assert policy.cooldown == 300
+        assert policy.estimated_instance_warmup == 120
         assert policy.adjustment_type == "ChangeInCapacity"
         assert result.instance_recommendations[0].instance_type == "m6g.xlarge"
         assert result.rationale.scaling_policy == "Queue depth p95 is 520 messages."
@@ -188,6 +190,22 @@ class TestParseLLMResponse:
         raw = json.dumps(data)
         result = parse_llm_response(raw, warmup_seconds=120, drain_seconds=300)
         assert result.step_scaling_policy.cooldown == 300
+
+    def test_enforces_min_estimated_instance_warmup(self):
+        """estimated_instance_warmup below warmup_seconds should be clamped."""
+        data = json.loads(json.dumps(VALID_LLM_RESPONSE))
+        data["step_scaling_policy"]["estimated_instance_warmup"] = 30
+        raw = json.dumps(data)
+        result = parse_llm_response(raw, warmup_seconds=120, drain_seconds=300)
+        assert result.step_scaling_policy.estimated_instance_warmup == 120
+
+    def test_defaults_estimated_instance_warmup(self):
+        """Missing estimated_instance_warmup should default to warmup_seconds."""
+        data = json.loads(json.dumps(VALID_LLM_RESPONSE))
+        del data["step_scaling_policy"]["estimated_instance_warmup"]
+        raw = json.dumps(data)
+        result = parse_llm_response(raw, warmup_seconds=120, drain_seconds=300)
+        assert result.step_scaling_policy.estimated_instance_warmup == 120
 
     def test_invalid_json_raises(self):
         with pytest.raises(ValueError, match="not valid JSON"):
@@ -243,6 +261,20 @@ class TestValidateResponse:
             ),
         )
         with pytest.raises(ValueError, match="Cooldown"):
+            _validate_response(response)
+
+    def test_estimated_instance_warmup_below_minimum_raises(self):
+        response = LLMAdvisorResponse(
+            step_scaling_policy=LLMStepScalingPolicy(
+                cooldown=300,
+                estimated_instance_warmup=30,
+                step_adjustments=[
+                    LLMStepAdjustment(scaling_adjustment=-1),
+                    LLMStepAdjustment(scaling_adjustment=1),
+                ],
+            ),
+        )
+        with pytest.raises(ValueError, match="estimated_instance_warmup"):
             _validate_response(response)
 
     def test_clamps_negative_bounds(self):

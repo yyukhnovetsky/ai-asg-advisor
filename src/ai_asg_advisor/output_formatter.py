@@ -21,6 +21,7 @@ def format_terraform(response: LLMAdvisorResponse, asg_name: str, warmup_seconds
         lines.append(f"      metric_interval_upper_bound = {upper}")
         lines.append("    },")
     lines.append("  ]")
+    lines.append(f"  estimated_instance_warmup = {policy.estimated_instance_warmup}")
 
     return "\n".join(lines) + "\n"
 
@@ -38,7 +39,7 @@ def format_text(response: LLMAdvisorResponse, asg_name: str) -> str:
     lines.append("")
 
     policy = response.step_scaling_policy
-    lines.append(f"STEP SCALING POLICY ({policy.adjustment_type}, cooldown={policy.cooldown}s):")
+    lines.append(f"STEP SCALING POLICY ({policy.adjustment_type}, cooldown={policy.cooldown}s, warmup={policy.estimated_instance_warmup}s):")
     for sa in policy.step_adjustments:
         lower = sa.metric_interval_lower_bound
         upper = sa.metric_interval_upper_bound
@@ -131,6 +132,7 @@ def _response_to_dict(response: LLMAdvisorResponse) -> dict:
         "step_scaling_policy": {
             "adjustment_type": policy.adjustment_type,
             "cooldown": policy.cooldown,
+            "estimated_instance_warmup": policy.estimated_instance_warmup,
             "step_adjustments": _steps_to_list(policy.step_adjustments),
         },
         "instance_recommendations": [

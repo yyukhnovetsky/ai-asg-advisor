@@ -50,6 +50,13 @@ GUARDRAILS:
      before previous ones have fully stopped. Use the maximum of
      instance_warmup_seconds and instance_drain_seconds as the minimum
      cooldown.
+   - ESTIMATED INSTANCE WARMUP: The estimated_instance_warmup parameter
+     tells the ASG how long a newly launched instance needs before it
+     contributes to the CloudWatch alarm metric. During this window the
+     ASG will not count the new instance, preventing premature additional
+     scale-out actions. It MUST be >= the provided instance_warmup_seconds.
+     You may recommend a higher value if the strategy or data warrants it
+     (e.g., performance strategy may add buffer), but never lower.
    - METRIC BOUNDS: The metric_interval_lower_bound and
      metric_interval_upper_bound values represent absolute queue depth
      thresholds (number of messages). Since queue depth cannot be negative,
@@ -86,6 +93,7 @@ OUTPUT SCHEMA:
   "step_scaling_policy": {
     "adjustment_type": "ChangeInCapacity",
     "cooldown": <int, seconds, >= max(instance_warmup_seconds, instance_drain_seconds)>,
+    "estimated_instance_warmup": <int, seconds, >= instance_warmup_seconds>,
     "step_adjustments": [
       {
         "metric_interval_lower_bound": <number >= 0, required>,
@@ -156,6 +164,7 @@ class LLMStepAdjustment:
 class LLMStepScalingPolicy:
     adjustment_type: str = "ChangeInCapacity"
     cooldown: int = 300
+    estimated_instance_warmup: int = 120
     step_adjustments: list[LLMStepAdjustment] = field(default_factory=list)
 
 
@@ -410,6 +419,7 @@ def _parse_scaling_policy(data: dict, warmup_seconds: int = 120, drain_seconds: 
     return LLMStepScalingPolicy(
         adjustment_type=data.get("adjustment_type", "ChangeInCapacity"),
         cooldown=max(data.get("cooldown", min_cooldown), min_cooldown),
+        estimated_instance_warmup=max(data.get("estimated_instance_warmup", warmup_seconds), warmup_seconds),
         step_adjustments=[
             LLMStepAdjustment(
                 metric_interval_lower_bound=sa.get("metric_interval_lower_bound"),
@@ -435,6 +445,13 @@ def _validate_response(response: LLMAdvisorResponse, warmup_seconds: int = 120, 
         raise ValueError(
             f"Cooldown {policy.cooldown}s is below minimum {min_cooldown}s "
             f"(warmup={warmup_seconds}s, drain={drain_seconds}s)"
+        )
+
+    # estimated_instance_warmup must be >= warmup
+    if policy.estimated_instance_warmup < warmup_seconds:
+        raise ValueError(
+            f"estimated_instance_warmup {policy.estimated_instance_warmup}s is below "
+            f"instance_warmup_seconds {warmup_seconds}s"
         )
 
     # Must have at least one negative (scale-down) and one positive (scale-up) adjustment
