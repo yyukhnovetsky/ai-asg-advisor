@@ -1,0 +1,87 @@
+{
+  "step_scaling_policy": {
+    "adjustment_type": "ChangeInCapacity",
+    "cooldown": 300,
+    "estimated_instance_warmup": 180,
+    "step_adjustments": [
+      {
+        "scaling_adjustment": -20,
+        "metric_interval_lower_bound": 0,
+        "metric_interval_upper_bound": 10
+      },
+      {
+        "scaling_adjustment": -8,
+        "metric_interval_lower_bound": 10,
+        "metric_interval_upper_bound": 50
+      },
+      {
+        "scaling_adjustment": -2,
+        "metric_interval_lower_bound": 50,
+        "metric_interval_upper_bound": 150
+      },
+      {
+        "scaling_adjustment": 5,
+        "metric_interval_lower_bound": 150,
+        "metric_interval_upper_bound": 300
+      },
+      {
+        "scaling_adjustment": 15,
+        "metric_interval_lower_bound": 300,
+        "metric_interval_upper_bound": 800
+      },
+      {
+        "scaling_adjustment": 30,
+        "metric_interval_lower_bound": 800,
+        "metric_interval_upper_bound": 1500
+      },
+      {
+        "scaling_adjustment": 60,
+        "metric_interval_lower_bound": 1500,
+        "metric_interval_upper_bound": null
+      }
+    ]
+  },
+  "instance_recommendations": [
+    {
+      "instance_type": "c6a.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.306,
+      "monthly_cost_estimate": 223.38,
+      "savings_vs_current_pct": 10.0,
+      "rationale": "AMD EPYC-based compute-optimized instance with identical vCPU/memory specs to the current c5.2xlarge. Delivers ~10% cost savings per instance with comparable single-threaded and multi-threaded performance. Best cost-to-performance ratio among all alternatives. At the observed average desired capacity of ~110 instances, this saves roughly $2,730/month fleet-wide."
+    },
+    {
+      "instance_type": "c5a.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.308,
+      "monthly_cost_estimate": 224.84,
+      "savings_vs_current_pct": 9.41,
+      "rationale": "Previous-generation AMD variant. Nearly identical savings to c6a.2xlarge (~9.4%). A solid fallback if c6a capacity is constrained in us-west-2. Same vCPU/memory profile ensures drop-in compatibility."
+    },
+    {
+      "instance_type": "c5.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.34,
+      "monthly_cost_estimate": 248.2,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Current baseline instance type. No savings but included for comparison. Well-proven with this workload. Retain in the mixed-instance policy for capacity diversity if needed."
+    },
+    {
+      "instance_type": "c6i.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.34,
+      "monthly_cost_estimate": 248.2,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Same price as c5.2xlarge but newer Intel Ice Lake platform with marginally better performance. No cost savings but useful as a capacity fallback in a mixed-instance group alongside c6a.2xlarge."
+    }
+  ],
+  "rationale": {
+    "scaling_policy": "The step thresholds are redesigned around the observed queue distribution (avg ~71, p50 ~32, p95 ~274, p99 ~577, max ~1760). For cost optimization: (1) Aggressive scale-down: queue 0-10 removes 20 instances (queue is nearly empty ~21% of the time, so we shed capacity quickly), 10-50 removes 8, and 50-150 removes 2 to gently right-size when queue is around/below median. (2) Conservative scale-up: the first scale-up step begins at 150 (above the median of 32 and closer to the upper range of normal load), adding only 5 instances. This avoids over-provisioning for routine queue fluctuations. Scale-up ramps at 300 (+15), 800 (+30), and 1500+ (+60) to handle p95/p99 surges and the observed max of ~1760. The unbounded top step at 1500+ adds 60 instances to match peak demand (max_desired observed was ~1629). The cooldown of 300 seconds respects the instance_drain_seconds constraint (300s) and exceeds warmup (120s), ensuring graceful drain completes before further terminations and new instances are healthy before additional launches. This longer cooldown also prevents cost-inefficient rapid oscillation.",
+    "strategy_impact": "Cost optimization strategy drove three key decisions: (1) Three scale-down steps vs. two scale-up thresholds below median \u2014 we aggressively reclaim capacity when queue depth is low, accepting slightly higher queue latency during brief spikes. (2) The first scale-up threshold is set at 150 (well above p50 of 32), meaning we tolerate moderate queue buildup rather than immediately adding capacity. This prevents unnecessary instance launches during normal workload variance. (3) The estimated_instance_warmup is set to 180s (above the 120s minimum) to add a small buffer that prevents premature alarm re-evaluation, reducing the chance of over-scaling during ramp-up. Instance recommendations favor AMD variants (c6a, c5a) which deliver 9-10% savings with equivalent specs \u2014 at ~110 average instances this yields substantial fleet savings.",
+    "risk_notes": "1) The 300s cooldown means the system will react more slowly to sudden spikes compared to the current 0s cooldown. During flash traffic (e.g., queue jumping from 0 to 1000+ in minutes), there will be a lag before multiple scale-up rounds execute. The observed max queue of ~1760 with max desired of ~1629 suggests the current fleet can eventually absorb large bursts, but latency-sensitive tasks may queue longer. 2) The aggressive scale-down at 0-10 depth (-20) could cause brief under-capacity if a new burst arrives immediately after scale-down. The 300s cooldown mitigates rapid repeated scale-downs. 3) Switching to c6a.2xlarge (AMD) should be validated with a canary deployment \u2014 transcription workloads may have AVX-512 or Intel-specific optimizations that perform differently on AMD EPYC. 4) max_size remains at 1800 which safely exceeds the observed peak desired of ~1629. Do not reduce it."
+  }
+}
