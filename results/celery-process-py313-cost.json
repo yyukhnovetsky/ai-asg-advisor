@@ -1,0 +1,68 @@
+{
+  "step_scaling_policy": {
+    "adjustment_type": "ChangeInCapacity",
+    "cooldown": 300,
+    "estimated_instance_warmup": 180,
+    "step_adjustments": [
+      {
+        "scaling_adjustment": -3,
+        "metric_interval_lower_bound": 0,
+        "metric_interval_upper_bound": 5
+      },
+      {
+        "scaling_adjustment": 3,
+        "metric_interval_lower_bound": 5,
+        "metric_interval_upper_bound": 100
+      },
+      {
+        "scaling_adjustment": 8,
+        "metric_interval_lower_bound": 100,
+        "metric_interval_upper_bound": 500
+      },
+      {
+        "scaling_adjustment": 15,
+        "metric_interval_lower_bound": 500,
+        "metric_interval_upper_bound": 5000
+      },
+      {
+        "scaling_adjustment": 25,
+        "metric_interval_lower_bound": 5000,
+        "metric_interval_upper_bound": null
+      }
+    ]
+  },
+  "instance_recommendations": [
+    {
+      "instance_type": "c5a.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.38,
+      "monthly_cost_estimate": 277.4,
+      "savings_vs_current_pct": 10.37,
+      "rationale": "AMD EPYC variant of c5 with identical vCPU/memory specs at 10.4% lower cost. Best price-per-hour among all alternatives. Celery workers are rarely sensitive to the minor single-thread performance difference between Intel and AMD, making this the top cost-optimization choice."
+    },
+    {
+      "instance_type": "c6a.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.3816,
+      "monthly_cost_estimate": 278.57,
+      "savings_vs_current_pct": 10.0,
+      "rationale": "Newer AMD generation (3rd Gen EPYC) at nearly the same price as c5a. Slightly better performance-per-dollar and longer expected availability on AWS. A strong second choice if c5a capacity is constrained in the region."
+    },
+    {
+      "instance_type": "c5.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.424,
+      "monthly_cost_estimate": 309.52,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Current baseline instance type. No savings but included for comparison. Switching to c5a.2xlarge with the same specs saves ~$32/month per instance."
+    }
+  ],
+  "rationale": {
+    "scaling_policy": "The queue is at zero depth 78.35% of the time (p50 = 0), with occasional sharp spikes up to ~55,600 messages. The policy is tuned for cost optimization: (1) Aggressive scale-down step: when queue depth is 0\u20135 messages, remove 3 instances to quickly shed capacity during the dominant idle periods. (2) A conservative first scale-up step at 5\u2013100 messages adds only 3 instances, absorbing small bursts without over-provisioning. (3) At 100\u2013500 messages, 8 instances are added to handle moderate load building towards the p95 of ~913. (4) At 500\u20135,000 messages, 15 instances ramp capacity firmly. (5) Above 5,000 messages (p99 territory at ~32,253), 25 instances are added to handle the rare extreme spikes that historically drove desired capacity to the max of 120. The thresholds are set higher than the current policy's to avoid premature scale-up during the 78% idle window, accepting slightly higher queue latency in exchange for significant cost savings.",
+    "strategy_impact": "Cost optimization strategy influenced several decisions: (a) The scale-down adjustment was increased from -2 to -3 to shed idle capacity faster during the dominant zero-queue periods. (b) The first scale-up threshold was raised from 1 to 5 messages to avoid reacting to trivial/transient queue blips. (c) The cooldown is set to 300 seconds (matching instance_drain_seconds, the binding constraint) which also serves cost optimization by preventing rapid oscillation and unnecessary instance launches. (d) estimated_instance_warmup is set to 180 seconds (above the 120s minimum) to add a buffer that prevents the ASG from launching additional waves before the first batch is processing, reducing over-provisioning. (e) Instance type recommendation favors the cheapest AMD variant (c5a.2xlarge) for ~10% per-instance savings, which compounds significantly at the average fleet size of ~15 instances (saving ~$480/month on instance costs alone).",
+    "risk_notes": "1) The historical min_desired of 0 suggests the ASG has scaled to zero before; the current min_size of 1 prevents this, which should be maintained. 2) The max_size of 120 matches the historical peak desired_capacity exactly\u2014consider keeping it at 120 or slightly above to avoid capacity ceiling during extreme spikes. 3) The 300-second cooldown means during a rapid spike from 0 to 50,000+ messages, it will take multiple cooldown cycles (~15\u201320 minutes) to reach full capacity. This is an accepted trade-off for cost optimization but operators should monitor p99 task latency. 4) Switching to c5a.2xlarge requires validating that no workload dependencies are tied to Intel-specific features (e.g., AVX-512). 5) With 78% zero-depth time, Reserved Instances or Savings Plans would further reduce costs for the baseline capacity of 1 instance, while the burst capacity benefits from On-Demand or Spot pricing."
+  }
+}

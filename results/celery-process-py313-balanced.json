@@ -1,0 +1,82 @@
+{
+  "step_scaling_policy": {
+    "adjustment_type": "ChangeInCapacity",
+    "cooldown": 300,
+    "estimated_instance_warmup": 120,
+    "step_adjustments": [
+      {
+        "scaling_adjustment": -3,
+        "metric_interval_lower_bound": 0,
+        "metric_interval_upper_bound": 1
+      },
+      {
+        "scaling_adjustment": 5,
+        "metric_interval_lower_bound": 1,
+        "metric_interval_upper_bound": 50
+      },
+      {
+        "scaling_adjustment": 10,
+        "metric_interval_lower_bound": 50,
+        "metric_interval_upper_bound": 200
+      },
+      {
+        "scaling_adjustment": 20,
+        "metric_interval_lower_bound": 200,
+        "metric_interval_upper_bound": 800
+      },
+      {
+        "scaling_adjustment": 35,
+        "metric_interval_lower_bound": 800,
+        "metric_interval_upper_bound": 5000
+      },
+      {
+        "scaling_adjustment": 55,
+        "metric_interval_lower_bound": 5000,
+        "metric_interval_upper_bound": null
+      }
+    ]
+  },
+  "instance_recommendations": [
+    {
+      "instance_type": "c5a.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.38,
+      "monthly_cost_estimate": 277.4,
+      "savings_vs_current_pct": 10.37,
+      "rationale": "AMD EPYC-based equivalent of c5.2xlarge with identical vCPU/memory specs at ~10% lower cost. Best price-performance ratio for compute-bound Celery workloads. Drop-in replacement with no architectural changes needed."
+    },
+    {
+      "instance_type": "c6a.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.3816,
+      "monthly_cost_estimate": 278.57,
+      "savings_vs_current_pct": 10.0,
+      "rationale": "Newer-generation AMD instance with improved per-core performance over c5a at nearly the same price point. Offers a good balance of modern hardware benefits and cost savings. Slightly better single-threaded performance than c5a."
+    },
+    {
+      "instance_type": "c5.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.424,
+      "monthly_cost_estimate": 309.52,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Current baseline instance type. Well-proven for this workload. No migration risk but offers no cost savings."
+    },
+    {
+      "instance_type": "c6i.2xlarge",
+      "vcpu": 8,
+      "memory_gb": 16.0,
+      "price_per_hour": 0.424,
+      "monthly_cost_estimate": 309.52,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Same price as c5.2xlarge but built on 3rd-gen Intel Xeon (Ice Lake) with ~15% better compute performance. Effectively offers more throughput per dollar at the same cost, which could reduce the number of instances needed at peak."
+    }
+  ],
+  "rationale": {
+    "scaling_policy": "The step thresholds are aligned to the observed queue depth distribution. With p50=0 and 78% zero-depth time, the first step (0\u20131) aggressively scales down by -3 to quickly shed idle capacity during the dominant quiet periods. The 1\u201350 step (+5) handles the common small bursts that represent typical work arrival. The 50\u2013200 step (+10) addresses moderate load. A new 200\u2013800 step (+20) bridges the gap around the p95 value of ~841 messages, ensuring adequate ramp-up before the queue grows further. The 800\u20135000 step (+35) provides strong scaling through the transition zone between p95 and p99 (31,323). The final unbounded step at 5000+ (+55) enables rapid scale-out toward the max capacity of 120 to handle the extreme bursts observed up to 54,617 messages. The previous policy had a maximum adjustment of +15 which was insufficient given that the ASG historically hit its max_desired of 120, indicating the policy struggled to keep up with burst arrivals.",
+    "strategy_impact": "The balanced strategy influenced the design by: (1) Setting cooldown at 300 seconds \u2014 the minimum required by instance_drain_seconds \u2014 which prevents thrashing while still allowing responsive scaling every 5 minutes. This avoids the overly aggressive approach of a performance strategy while being faster than a cost-focused strategy might dictate. (2) Using moderate scale-down of -3 rather than -1 (too slow/costly) or -5+ (too aggressive/risky). (3) Adding two additional high-threshold steps (800\u20135000 and 5000+) compared to the original policy to provide more granular and proportionate responses to the wide range of observed queue depths (0 to 54,617). (4) Recommending c5a.2xlarge as the top choice \u2014 it provides the best absolute cost savings without sacrificing any meaningful performance, representing the optimal price-performance trade-off.",
+    "risk_notes": "1. The queue is at zero 78.17% of the time but the policy cannot scale to zero (min_size=1), which is appropriate since zero-depth is below the 80% safety threshold. 2. The observed max_desired reached 120 (the current max_size ceiling), meaning during peak bursts the ASG was capacity-constrained. Consider monitoring whether 120 remains sufficient; if queue depth persists at high levels even at max capacity, max_size may need to increase. 3. The 300-second cooldown means during extreme burst scenarios (queue jumping from 0 to 50,000+), it takes multiple scaling cycles (~15-20 minutes) to reach full capacity. This is an acceptable trade-off for balanced strategy but will result in temporary queue buildup during sudden spikes. 4. Switching to c5a.2xlarge (AMD) should be validated with application testing to ensure no AMD-specific compatibility issues, though for Python/Celery workloads this is extremely unlikely. 5. The scale-down adjustment of -3 combined with 300s cooldown means draining from 120 to 1 instance takes approximately 200 minutes (~3.3 hours) in the absence of new work, which balances cost savings against the risk of scaling down too quickly before a subsequent burst."
+  }
+}

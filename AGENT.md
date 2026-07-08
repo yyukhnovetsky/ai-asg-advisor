@@ -45,8 +45,8 @@ config.toml.example      # Example config file
 - **Both bounds required**: Every step must have `metric_interval_lower_bound` and `metric_interval_upper_bound`. Use `0` for the lowest lower bound, `null` for unbounded upper.
 - **Non-negative bounds**: All metric bounds must be >= 0 (queue depth cannot be negative).
 - **Cooldown**: Must be >= `max(warmup_seconds, drain_seconds)`. Default warmup=120s, drain=300s.
+- **Estimated instance warmup**: `estimated_instance_warmup` must be >= `warmup_seconds`. Prevents premature scaling during instance boot. Both `cooldown` and `estimated_instance_warmup` are included in the policy output.
 - **Terraform output**: Generates a `step_adjustments = [...]` list for use as a Terraform module variable, not a full resource block.
-- **StepScaling has no cooldown**: Only `estimated_instance_warmup` applies to StepScaling policies (cooldown is SimpleScaling-only).
 
 ## Environment Variables
 

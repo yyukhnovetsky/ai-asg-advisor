@@ -151,6 +151,8 @@ GUARDRAILS:
      (positive adjustment) steps within the single policy.
    - Minimum cooldown period: 60 seconds.
    - Cooldown MUST be >= max(instance_warmup_seconds, instance_drain_seconds).
+   - estimated_instance_warmup MUST be >= instance_warmup_seconds
+     (prevents premature scale-out before new instances are ready).
    - All metric bounds MUST be >= 0 (queue depth cannot be negative).
    - Every step MUST have both metric_interval_lower_bound and
      metric_interval_upper_bound (use 0 for lowest, null for unbounded).
@@ -240,6 +242,7 @@ The data context sent to the LLM follows this structure:
   "step_scaling_policy": {
     "adjustment_type": "ChangeInCapacity",
     "cooldown": 300,
+    "estimated_instance_warmup": 120,
     "step_adjustments": [
       { "metric_interval_lower_bound": 0,    "metric_interval_upper_bound": 50,   "scaling_adjustment": -10 },
       { "metric_interval_lower_bound": 50,   "metric_interval_upper_bound": 200,  "scaling_adjustment": -5 },
@@ -305,6 +308,7 @@ The tool generates a `step_adjustments` list ready to pass into a Terraform modu
       metric_interval_upper_bound = null
     },
   ]
+  estimated_instance_warmup = 120
 ```
 
 ## Installation
@@ -364,88 +368,109 @@ model = "claude-sonnet-4-20250514"
 ## Usage
 
 ```bash
-# Basic: analyze with balanced strategy, output Terraform to stdout
-ai-asg-advisor \
-  --asg celery-email-sync-py39 \
-  --queue email_sync_v2 \
-  --period 2w
+# celery-email-sync-py39 (balanced, 2w)
+ai-asg-advisor --asg celery-email-sync-py39 --queue email_sync_v2 --period 2w \
+  --format terraform --output results/celery-email-sync-py39.tf
+ai-asg-advisor --asg celery-email-sync-py39 --queue email_sync_v2 --period 2w \
+  --format json --output results/celery-email-sync-py39.json
 
-# Generate both Terraform and JSON outputs to files
-ai-asg-advisor \
-  --asg celery-email-sync-py39 \
-  --queue email_sync_v2 \
-  --period 2w \
-  --format terraform \
-  --output results/celery-email-sync-py39.tf
+# celery-beautify-v4-py39 (balanced, 2w)
+ai-asg-advisor --asg celery-beautify-v4-py39 --queue beautify_v4 --period 2w \
+  --format terraform --output results/celery-beautify-v4-py39.tf
+ai-asg-advisor --asg celery-beautify-v4-py39 --queue beautify_v4 --period 2w \
+  --format json --output results/celery-beautify-v4-py39.json
 
-ai-asg-advisor \
-  --asg celery-email-sync-py39 \
-  --queue email_sync_v2 \
-  --period 2w \
-  --format json \
-  --output results/celery-email-sync-py39.json
-
-# Performance strategy with 1-month lookback, writing to files
-ai-asg-advisor \
-  --asg celery-beautify-v4-py39 \
-  --queue beautify_v4 \
-  --period 1m \
+# celery-beautify-v4-py39 (performance, 1m)
+ai-asg-advisor --asg celery-beautify-v4-py39 --queue beautify_v4 --period 1m \
   --strategy performance \
-  --format terraform \
-  --output results/celery-beautify-v4-py39-performance.tf
+  --format terraform --output results/celery-beautify-v4-py39-performance.tf
+ai-asg-advisor --asg celery-beautify-v4-py39 --queue beautify_v4 --period 1m \
+  --strategy performance \
+  --format json --output results/celery-beautify-v4-py39-performance.json
 
-# ASG in a different region (default is us-west-1)
-ai-asg-advisor \
-  --asg celery-transcription-v3-usw2-py39 \
-  --queue transcription_v3 \
-  --period 1m \
-  --region us-west-2 \
-  --format terraform \
-  --output results/celery-transcription-v3-usw2-py39.tf
-
-# Cost-optimized analysis, JSON output
-ai-asg-advisor \
-  --asg celery-email-sync-py39 \
-  --queue email_sync_v2 \
-  --period 1m \
+# celery-beautify-v4-py39 (cost, 2w)
+ai-asg-advisor --asg celery-beautify-v4-py39 --queue beautify_v4 --period 2w \
   --strategy cost \
-  --format json
+  --format terraform --output results/celery-beautify-v4-py39-cost.tf
+ai-asg-advisor --asg celery-beautify-v4-py39 --queue beautify_v4 --period 2w \
+  --strategy cost \
+  --format json --output results/celery-beautify-v4-py39-cost.json
 
+# celery-meeting-briefs-py39 (performance, 2w)
+ai-asg-advisor --asg celery-meeting-briefs-py39 --queue meeting_briefs --period 2w \
+  --strategy performance \
+  --format terraform --output results/celery-meeting-briefs-py39-performance.tf
+ai-asg-advisor --asg celery-meeting-briefs-py39 --queue meeting_briefs --period 2w \
+  --strategy performance \
+  --format json --output results/celery-meeting-briefs-py39-performance.json
+
+# celery-transcription-v3-usw2-py39 (balanced, 2w, us-west-2)
+ai-asg-advisor --asg celery-transcription-v3-usw2-py39 --queue transcription_v3 --period 2w \
+  --region us-west-2 \
+  --format terraform --output results/celery-transcription-v3-usw2-py39.tf
+ai-asg-advisor --asg celery-transcription-v3-usw2-py39 --queue transcription_v3 --period 2w \
+  --region us-west-2 \
+  --format json --output results/celery-transcription-v3-usw2-py39.json
+
+# celery-transcription-v3-usw2-py39 (performance, 1m, us-west-2)
+ai-asg-advisor --asg celery-transcription-v3-usw2-py39 --queue transcription_v3 --period 1m \
+  --region us-west-2 --strategy performance \
+  --format terraform --output results/celery-transcription-v3-usw2-py39-performance.tf
+ai-asg-advisor --asg celery-transcription-v3-usw2-py39 --queue transcription_v3 --period 1m \
+  --region us-west-2 --strategy performance \
+  --format json --output results/celery-transcription-v3-usw2-py39-performance.json
+
+# celery-transcription-v3-usw2-py39 (cost, 2w, us-west-2)
+ai-asg-advisor --asg celery-transcription-v3-usw2-py39 --queue transcription_v3 --period 2w \
+  --region us-west-2 --strategy cost \
+  --format terraform --output results/celery-transcription-v3-usw2-py39-cost.tf
+ai-asg-advisor --asg celery-transcription-v3-usw2-py39 --queue transcription_v3 --period 2w \
+  --region us-west-2 --strategy cost \
+  --format json --output results/celery-transcription-v3-usw2-py39-cost.json
+
+# celery-playlist-py39 (balanced, 2w)
+ai-asg-advisor --asg celery-playlist-py39 --queue user_actions --period 2w \
+  --strategy balanced \
+  --format terraform --output results/celery-playlist-py39-balanced.tf
+ai-asg-advisor --asg celery-playlist-py39 --queue user_actions --period 2w \
+  --strategy balanced \
+  --format json --output results/celery-playlist-py39-balanced.json
+
+# celery-process-py313 (balanced, 2w)
+ai-asg-advisor --asg celery-process-py313 --queue process --period 2w \
+  --strategy balanced \
+  --format terraform --output results/celery-process-py313-balanced.tf
+ai-asg-advisor --asg celery-process-py313 --queue process --period 2w \
+  --strategy balanced \
+  --format json --output results/celery-process-py313-balanced.json
+
+# celery-process-py313 (cost, 2w)
+ai-asg-advisor --asg celery-process-py313 --queue process --period 2w \
+  --strategy cost \
+  --format terraform --output results/celery-process-py313-cost.tf
+ai-asg-advisor --asg celery-process-py313 --queue process --period 2w \
+  --strategy cost \
+  --format json --output results/celery-process-py313-cost.json
+```
+
+#### Other examples
+
+```bash
 # Human-readable text summary
-ai-asg-advisor \
-  --asg celery-email-sync-py39 \
-  --queue email_sync_v2 \
-  --period 2w \
-  --format text
+ai-asg-advisor --asg celery-email-sync-py39 --queue email_sync_v2 --period 2w --format text
 
 # Use IAM role (EC2 environment)
-ai-asg-advisor \
-  --asg celery-email-sync-py39 \
-  --queue email_sync_v2 \
-  --period 2w \
-  --role ai-advisor-role
+ai-asg-advisor --asg celery-email-sync-py39 --queue email_sync_v2 --period 2w --role ai-advisor-role
 
 # Include Graviton (ARM64) instance types in recommendations
-ai-asg-advisor \
-  --asg celery-email-sync-py39 \
-  --queue email_sync_v2 \
-  --period 2w \
-  --use-graviton yes
+ai-asg-advisor --asg celery-email-sync-py39 --queue email_sync_v2 --period 2w --use-graviton yes
 
 # Custom warmup/drain times and config file
-ai-asg-advisor \
-  --asg celery-email-sync-py39 \
-  --queue email_sync_v2 \
-  --period 2w \
-  --warmup 180 \
-  --drain 600 \
-  --config ./my-config.toml
+ai-asg-advisor --asg celery-email-sync-py39 --queue email_sync_v2 --period 2w \
+  --warmup 180 --drain 600 --config ./my-config.toml
 
 # Verbose logging (debug output to stderr)
-ai-asg-advisor \
-  --asg celery-email-sync-py39 \
-  --queue email_sync_v2 \
-  -v
+ai-asg-advisor --asg celery-email-sync-py39 --queue email_sync_v2 -v
 ```
 
 ### CLI Options

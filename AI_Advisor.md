@@ -1,16 +1,27 @@
-# AI ASG Advisor
+# AI ASG Advisor — Original Design Notes
 
-Analyzing tool for optimizing the dynamic autoscaling step policies.
+> **This document contains the original design requirements that guided initial development.
+> For current documentation, see [`README.md`](README.md).**
 
-## Inputs
+## Original Requirements
 
-The optimization should be performed based on the following inputs:
+### Inputs
 
-### 1. RabbitMQ Metrics
+1. **RabbitMQ Metrics** — `rabbitmq_detailed_queue_messages_ready` from CloudWatch
+2. **Analysis Period** — 1 week to 2 months
+3. **ASG Capacity** — `desired_capacity` and `max_size` for `celery-*` ASGs
+4. **Existing Autoscaling Policies** — current step scaling policies for each ASG
+5. **Python 3.13+** — minimum runtime version
+6. **CLI Interface** — command-line tool (no UI)
+7. **AWS Authorization** — named profile (`ai-advisor`) or IAM role assumption
+8. **Output** — Terraform `step_adjustment` blocks
 
-Metric: `rabbitmq_detailed_queue_messages_ready` for all queues.
+### Initial Focus
 
-Dimensions block:
+- **ASG:** `celery-email-sync-py39`
+- **RabbitMQ queue:** `email_sync_v2`
+
+### CloudWatch Dimensions
 
 ```hcl
 dimensions = {
@@ -18,43 +29,3 @@ dimensions = {
   "queue"   = "some-queue"
 }
 ```
-
-### 2. Analysis Period
-
-The analyzed period can vary:
-- 1 week
-- 2 weeks
-- 3 weeks
-- 1 month
-- 2 months
-
-### 3. ASG Capacity
-
-For all the ASGs named `celery-*`, analyze the ASG capacity (`desired_capacity` and `max_size`) for the same period of time as for messages in RabbitMQ queues.
-
-**Initial focus:**
-- **ASG:** `celery-email-sync-py39`
-- **RabbitMQ queue:** `email_sync_v2`
-
-### 4. Existing Autoscaling Policies
-
-Existing autoscaling policies for every ASG named `celery-*`.
-
-### 5. Python Version
-
-Python 3.13 or higher should be used for the analyzing tool.
-
-### 6. Interface
-
-For the beginning, only a backend (command-line tool) is required.
-
-### 7. AWS Authorization
-
-The authorization against AWS can be done by:
-
-- **Local execution:** Using a dedicated profile `[ai-adviser]`, defined in `~/.aws/credentials`.
-- **EC2 execution:** Assuming IAM role `ai-advisor-role`, when the tool is being executed within an EC2 that assumes the appropriate profile.
-
-### 8. Required Output
-
-Generate a `step_adjustment` block suitable for Terraform code.

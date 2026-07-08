@@ -74,7 +74,9 @@
       "Bash(perl -pi -e 's/aws_autoscaling_group\\\\.machine-download-diarization-py313\\\\.name/local.machine_download_diarization_py313_asg_name/g' machine-download-diarization.tf)",
       "Bash(perl -pi -e 's/aws_autoscaling_group\\\\.machine-download-processing-py313\\\\.name/local.machine_download_processing_py313_asg_name/g' machine-download-processing.tf)",
       "Bash(perl -pi -e 's/aws_autoscaling_group\\\\.machine-large-py313\\\\.name/local.machine_large_py313_asg_name/g' machine-large.tf)",
-      "Bash(terraform fmt:*)"
+      "Bash(terraform fmt:*)",
+      "Bash(git -C /Users/yakov.yukhnovetsky/GIT/DevOps/ai-asg-advisor diff --stat)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }
