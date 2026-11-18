@@ -1,0 +1,82 @@
+{
+  "step_scaling_policy": {
+    "adjustment_type": "ChangeInCapacity",
+    "cooldown": 300,
+    "estimated_instance_warmup": 120,
+    "step_adjustments": [
+      {
+        "scaling_adjustment": -5,
+        "metric_interval_lower_bound": 0,
+        "metric_interval_upper_bound": 5
+      },
+      {
+        "scaling_adjustment": -2,
+        "metric_interval_lower_bound": 5,
+        "metric_interval_upper_bound": 50
+      },
+      {
+        "scaling_adjustment": 1,
+        "metric_interval_lower_bound": 50,
+        "metric_interval_upper_bound": 200
+      },
+      {
+        "scaling_adjustment": 3,
+        "metric_interval_lower_bound": 200,
+        "metric_interval_upper_bound": 1000
+      },
+      {
+        "scaling_adjustment": 8,
+        "metric_interval_lower_bound": 1000,
+        "metric_interval_upper_bound": 5000
+      },
+      {
+        "scaling_adjustment": 15,
+        "metric_interval_lower_bound": 5000,
+        "metric_interval_upper_bound": null
+      }
+    ]
+  },
+  "instance_recommendations": [
+    {
+      "instance_type": "m6a.large",
+      "vcpu": 2,
+      "memory_gb": 8.0,
+      "price_per_hour": 0.1008,
+      "monthly_cost_estimate": 73.58,
+      "savings_vs_current_pct": 10.0,
+      "rationale": "Best price-performance option. Newer AMD EPYC generation than m5, non-burstable so sustained workloads are handled without credit concerns. 10% cheaper than m5.large with equivalent or better single-thread performance. Ideal balanced choice for a download-oriented worker."
+    },
+    {
+      "instance_type": "m5a.large",
+      "vcpu": 2,
+      "memory_gb": 8.0,
+      "price_per_hour": 0.101,
+      "monthly_cost_estimate": 73.73,
+      "savings_vs_current_pct": 9.82,
+      "rationale": "AMD variant of the current m5.large. Nearly identical performance profile, non-burstable, ~10% savings. Good drop-in replacement with minimal risk."
+    },
+    {
+      "instance_type": "t3a.large",
+      "vcpu": 2,
+      "memory_gb": 8.0,
+      "price_per_hour": 0.0893,
+      "monthly_cost_estimate": 65.19,
+      "savings_vs_current_pct": 20.27,
+      "rationale": "Lowest cost option at ~20% savings. However, it is burstable \u2014 suitable only if download workers are I/O-bound and don't sustain high CPU. Given 27.7% zero-depth time and bursty queue patterns, CPU credits may accumulate during idle periods. Moderate risk if sustained spikes cause credit exhaustion."
+    },
+    {
+      "instance_type": "m5.large",
+      "vcpu": 2,
+      "memory_gb": 8.0,
+      "price_per_hour": 0.112,
+      "monthly_cost_estimate": 81.76,
+      "savings_vs_current_pct": 0.0,
+      "rationale": "Current baseline instance type. Proven to work with the existing workload. No migration risk."
+    }
+  ],
+  "rationale": {
+    "scaling_policy": "Steps are aligned with observed queue depth percentiles. The p50 is ~7 messages, so below 5 messages the queue is well-drained and aggressive scale-down (-5) reclaims cost quickly. Between 5-50 messages (around p50), a moderate scale-down (-2) gently reduces capacity since work is light. The 50-200 range represents modest load above median, warranting a small +1 scale-up. The 200-1000 range covers building load toward the p95 (~3042), adding +3 instances. The 1000-5000 band captures the p95 zone where the queue is significantly backed up, adding +8 to ramp capacity quickly. Above 5000 (approaching p99 of ~10280), an aggressive +15 is applied to handle extreme spikes \u2014 the max_desired has historically hit 70, confirming these bursts occur and require rapid response.",
+    "strategy_impact": "The balanced strategy drove moderate cooldown (300s, the minimum allowed by the drain time) rather than aggressive values. Step thresholds were set to match observed percentiles rather than arbitrary round numbers, ensuring the policy responds proportionally to actual traffic patterns. Instance recommendations favor m6a.large as the best price-performance non-burstable option, with burstable t3a.large offered as a higher-savings alternative with acknowledged risk. The estimated_instance_warmup of 120s matches the warmup requirement exactly, allowing the ASG to count new instances as soon as they're ready without adding unnecessary delay to metric evaluation.",
+    "risk_notes": "1) The current max_size of 70 should be retained \u2014 historical data shows desired capacity has reached 70, and the aggressive +15 step could push capacity high during extreme spikes. 2) The scale-down step of -5 at low queue depth is aggressive; if min_size is 1, this could rapidly reduce to minimum during brief lulls. Consider whether min_size=1 provides enough baseline capacity for latency-sensitive workloads. 3) If t3a.large is chosen, monitor CPU credit balance closely during sustained high-queue periods (p95+ events) \u2014 credit exhaustion would throttle download workers. 4) The cooldown of 300s (driven by drain time) means during rapid ramp-up events, it takes 5 minutes between successive scaling actions; the estimated_instance_warmup of 120s helps the ASG avoid double-counting but the cooldown still gates the next action. If faster scale-out is critical, consider reducing instance_drain_seconds at the application level."
+  }
+}
